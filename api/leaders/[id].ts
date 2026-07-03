@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { supabaseAdmin } from './_lib';
+import { supabaseAdmin } from '../_lib';
 
 // DELETE /api/leaders/[id]
 export default async function handler(req: VercelRequest, res: VercelResponse) {

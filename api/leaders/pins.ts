@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { supabaseAdmin, migrateLegacyPins, decryptPin, getEncryptionKey } from './_lib';
+import { supabaseAdmin, migrateLegacyPins, decryptPin, getEncryptionKey } from '../_lib';
 
 // GET /api/leaders/pins — planner only: reveals decrypted PINs
 export default async function handler(req: VercelRequest, res: VercelResponse) {
