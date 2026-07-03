@@ -1,0 +1,8 @@
+{
+  "name": "ProPlan Integration System",
+  "description": "Production planning system integrated from material order to delivery with a 3M (Material, Machine, Man) dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
