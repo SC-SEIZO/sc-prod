@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, AlertTriangle, CheckCircle, Clock, Save, Tag, X, User, Settings2, Bluetooth, RefreshCw, AlertCircle } from 'lucide-react';
+import { Play, Pause, AlertTriangle, CheckCircle, Clock, Save, Tag, X, User, Settings2, Bluetooth, RefreshCw, AlertCircle, PauseCircle, Inbox } from 'lucide-react';
 import { PrintLabelModal } from './PrintLabelModal';
 import { useUserRole } from '../../context/UserContext';
 import { useProduction, getUniqueMachineKey } from '../../context/ProductionContext';
@@ -43,6 +43,20 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
   const [lastConnectedName, setLastConnectedName] = useState<string>(() => {
     return typeof window !== 'undefined' ? (localStorage.getItem('sugity_last_printer') || '') : '';
   });
+
+  // Bluetooth Pairing Requirement & Dev Bypass Toggle
+  const [bypassBtRequirement, setBypassBtRequirement] = useState<boolean>(() => {
+    return typeof window !== 'undefined' ? (localStorage.getItem('sugity_dev_bypass_bt') === 'true') : true;
+  });
+
+  const toggleBypassBtRequirement = () => {
+    const newVal = !bypassBtRequirement;
+    setBypassBtRequirement(newVal);
+    localStorage.setItem('sugity_dev_bypass_bt', String(newVal));
+  };
+
+  const isBtConnected = connectionStatus === 'connected';
+  const isBtReadyForProduction = isBtConnected || bypassBtRequirement;
 
   const isBluetoothSupported = typeof window !== 'undefined' && 'bluetooth' in navigator;
 
@@ -145,6 +159,8 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
     status: 'queued',
     timeRange: '--:-- - --:--'
   };
+
+  const isNoActiveJob = !runningJob || activeJob.id === 'job-default' || activeJob.model === 'N/A' || activeJob.model === 'No active job running';
 
   const [showPrintLabel, setShowPrintLabel] = useState(false);
   const [showLeaderSignOff, setShowLeaderSignOff] = useState(false);
@@ -430,6 +446,10 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
   };
 
   const handleCompleteDandori = () => {
+    if (!isBtReadyForProduction) {
+      alert("⚠️ SAMBUNGAN PRINTER BLUETOOTH WAJIB TERHUBUNG!\n\nPrinter Bluetooth belum ter-pair. Silakan klik 'Pair Bluetooth Printer' di panel sebelah kanan sebelum memulai produksi, atau aktifkan 'Dev Mode Bypass'.");
+      return;
+    }
     updateJobStatus(activeJob.id, 'complete-dandori', {
       type: 'success',
       note: `Completed Dandori setup for ${activeJob.model}. Starting production.`
@@ -526,7 +546,125 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
         )}
 
         {/* Current Active Job Panel */}
-        {activeJob.status === 'dandori' ? (
+        <div className="relative">
+          {/* Light-Theme Card Overlay when Bluetooth is Disconnected in Strict Mode */}
+          {!isBtReadyForProduction && (
+            <div className="absolute inset-0 z-30 bg-white/95 backdrop-blur-md rounded-xl p-6 sm:p-8 flex flex-col items-center justify-center text-center shadow-lg border border-amber-300 animate-in fade-in duration-200">
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mb-3 shadow-sm animate-bounce">
+                <Bluetooth className="w-7 h-7 stroke-[2.5]" />
+              </div>
+
+              <span className="px-3 py-1 bg-amber-100 border border-amber-200/80 text-amber-800 rounded-full text-[10px] font-black uppercase tracking-wider mb-2">
+                🔒 Lock Mode: Bluetooth Printer Offline
+              </span>
+
+              <h3 className="text-lg sm:text-xl font-black text-slate-800 uppercase tracking-tight mb-1">
+                Printer Bluetooth Wajib Terhubung
+              </h3>
+              
+              <p className="text-xs text-slate-500 font-medium leading-relaxed max-w-md mb-6">
+                Koneksi printer Bluetooth terputus atau tablet baru ter-reset. Untuk menjamin cetakan Kanban & Label produksi valid, sambungkan Bluetooth Printer sebelum memproses job ini.
+              </p>
+
+              <div className="w-full max-w-sm space-y-2.5">
+                <button
+                  onClick={connectBluetoothPrinter}
+                  disabled={!isBluetoothSupported || connectionStatus === 'connecting'}
+                  className={`w-full py-3 rounded-xl font-black uppercase text-xs tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer ${
+                    !isBluetoothSupported 
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed' 
+                      : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20'
+                  }`}
+                >
+                  {connectionStatus === 'connecting' ? (
+                    <><RefreshCw className="w-4 h-4 animate-spin" /> Connecting Printer...</>
+                  ) : (
+                    <><Bluetooth className="w-4 h-4" /> Pair Bluetooth Printer Now</>
+                  )}
+                </button>
+
+                <button
+                  onClick={toggleBypassBtRequirement}
+                  className="w-full py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-amber-900 font-bold uppercase rounded-xl text-[10px] tracking-wider transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  ⚡ Aktifkan Dev Bypass Mode (Tanpa Printer)
+                </button>
+              </div>
+
+              {connectionError && (
+                <div className="mt-4 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-[10px] font-bold uppercase tracking-wider w-full max-w-sm text-center">
+                  ⚠️ {connectionError}
+                </div>
+              )}
+            </div>
+          )}
+
+          {isNoActiveJob ? (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-slate-200 bg-slate-800 text-white flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.8)]"></div>
+                <h3 className="font-bold text-sm uppercase tracking-wider flex items-center gap-2">
+                  <PauseCircle className="w-4 h-4 text-amber-400" />
+                  Machine Status: Standby / Idle
+                </h3>
+              </div>
+              <div className="flex gap-2 items-center">
+                <span className="px-2.5 py-0.5 bg-slate-700/80 border border-slate-600 rounded text-[10px] font-bold text-amber-300 uppercase tracking-wider">
+                  No Active Work Order
+                </span>
+              </div>
+            </div>
+
+            <div className="p-8 flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 mb-4 shadow-[0_0_20px_rgba(245,158,11,0.12)]">
+                <Inbox className="w-8 h-8" />
+              </div>
+
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight mb-2">
+                Tidak Ada Job Produksi Aktif
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-500 max-w-lg mb-6 leading-relaxed">
+                Mesin <span className="font-bold text-slate-700">#{machine}</span> saat ini berada dalam status <span className="font-bold text-amber-600">Idle / Standby</span>. Belum ada rencana produksi aktif yang dialokasikan untuk jadwal saat ini.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-xl mb-6 text-left">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Machine ID</span>
+                  <span className="text-xs font-black text-slate-800 font-mono mt-0.5 block">#{machine} ({factory})</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Status Mesin</span>
+                  <span className="text-xs font-black text-amber-600 font-mono mt-0.5 block uppercase">Idle / Standby</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Total Schedule</span>
+                  <span className="text-xs font-black text-slate-800 font-mono mt-0.5 block">{jobs.length} Jobs Total</span>
+                </div>
+              </div>
+
+              {/* Action options */}
+              <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xl">
+                <button 
+                  onClick={() => {
+                    const now = new Date();
+                    const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                    setAbnormalityStartTime(timeStr);
+                    setMachineAbnormal(true, 'downtime', timeStr);
+                    setIsReportingAbnormality(true);
+                  }}
+                  disabled={!canExecute || isAbnormalActive}
+                  title={isAbnormalActive ? "Abnormality already active" : (!canExecute ? "Switch to Member role to report" : "Report machine downtime/breakdown")}
+                  className={`flex-1 py-3 border-2 rounded-xl font-bold uppercase tracking-wider text-xs flex items-center justify-center gap-2 transition-colors ${
+                    (!canExecute || isAbnormalActive) ? 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed' : 'bg-white border-rose-200 text-rose-600 hover:bg-rose-50'
+                  }`}
+                >
+                  <AlertTriangle className="w-4 h-4" /> Report Downtime
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : activeJob.status === 'dandori' ? (
           <div className="bg-white rounded-xl shadow-sm border border-blue-200 overflow-hidden flex flex-col">
             <div className="p-4 border-b border-blue-100 bg-gradient-to-r from-blue-600 to-indigo-700 text-white flex justify-between items-center">
                <div className="flex items-center gap-3">
@@ -758,10 +896,11 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
                  >
                     <AlertCircle className="w-4 h-4 text-slate-500" /> Close {activeJob.shift?.toUpperCase()} Shift Production
                  </button>
-              </div>
-            </div>
-          </div>
-        )}
+               </div>
+             </div>
+           </div>
+         )}
+        </div>
 
         {/* Next in Queue */}
         <div>
@@ -862,6 +1001,29 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
                 )}
               </div>
             )}
+
+            {/* Dev Mode Bypass BT Pairing Requirement Toggle */}
+            <div className="mt-2 pt-2 border-t border-slate-200 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[9.5px] font-black text-slate-700 uppercase tracking-tight">Dev Bypass Mode:</span>
+                <button
+                  onClick={toggleBypassBtRequirement}
+                  className={`px-2.5 py-1 rounded text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border shadow-sm ${
+                    bypassBtRequirement
+                      ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                      : 'bg-emerald-100 text-emerald-900 border-emerald-300 hover:bg-emerald-200'
+                  }`}
+                  title="Toggle Bluetooth Printer requirement lock for development"
+                >
+                  {bypassBtRequirement ? '⚡ Bypass ON' : '🔒 Strict BT Req'}
+                </button>
+              </div>
+              <p className="text-[8px] font-bold text-slate-500 leading-snug">
+                {bypassBtRequirement
+                  ? 'Dev Bypass Aktif: Rencana pekerjaan dapat dimulai tanpa printer Bluetooth.'
+                  : 'Mode Produksi: Bluetooth Wajib terhubung sebelum mulai pekerjaan.'}
+              </p>
+            </div>
           </div>
 
           <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-3">
