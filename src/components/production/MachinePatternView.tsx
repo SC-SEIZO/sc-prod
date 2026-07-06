@@ -2,7 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { Calendar, Clock, ArrowRight, Settings2, ShieldCheck, Box, GripVertical, CheckCircle, Play, Wrench, Clock3, Sparkles, Trash2, Layers, Gauge, Database, RotateCcw, AlertTriangle } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useUserRole } from '../../context/UserContext';
-import { useProduction, Job, getUniqueMachineKey, addWorkingMinutes, getHeijunkaJobsForMachine, getTodayDateString, ProductionContext } from '../../context/ProductionContext';
+import { useProduction, Job, AbnormalityLog, getUniqueMachineKey, addWorkingMinutes, getHeijunkaJobsForMachine, getTodayDateString, ProductionContext } from '../../context/ProductionContext';
 import { useParts } from '../../context/PartsContext';
 
 interface DandoriInputProps {
@@ -70,9 +70,12 @@ interface ShiftTimelineProps {
   isToday?: boolean;
   isAbnormalActive?: boolean;
   isNgActive?: boolean;
+  logs?: AbnormalityLog[];
+  activeAbnormalStart?: string;
+  activeNgStart?: string;
 }
 
-function ShiftTimeline({ shift, jobs, avgJobs, dayOT, nightOT, showDailyAndAct = true, isToday = true, isAbnormalActive = false, isNgActive = false }: ShiftTimelineProps) {
+function ShiftTimeline({ shift, jobs, avgJobs, dayOT, nightOT, showDailyAndAct = true, isToday = true, isAbnormalActive = false, isNgActive = false, logs = [], activeAbnormalStart = '', activeNgStart = '' }: ShiftTimelineProps) {
   const allShiftJobs = jobs.filter(j => j.shift === shift);
   const allAvgShiftJobs = avgJobs.filter(j => j.shift === shift);
   const totalMins = shift === 'day' ? 720 : 615; // Day: 12h (07:00-19:00), Night: 10.25h (21:00-07:15)
@@ -316,6 +319,115 @@ function ShiftTimeline({ shift, jobs, avgJobs, dayOT, nightOT, showDailyAndAct =
       productionEndStr: pEndStr
     };
   });
+
+  // --- Helper to verify if a HH:MM time falls within this shift's operating hours ---
+  const isTimeInShift = (timeStr: string): boolean => {
+    if (!timeStr) return false;
+    const parts = timeStr.trim().split(':');
+    if (parts.length < 2) return false;
+    const hh = parseInt(parts[0], 10);
+    const mm = parseInt(parts[1], 10);
+    if (isNaN(hh) || isNaN(mm)) return false;
+    const mins = hh * 60 + mm;
+
+    if (shift === 'day') {
+      return mins >= 420 && mins <= 1140; // 07:00 to 19:00
+    } else {
+      return mins >= 1260 || mins <= 435; // 21:00 to 07:15
+    }
+  };
+
+  // --- Build Abnormality / NG time-loss intervals for chart overlay ---
+  interface LossInterval { startTime: string; endTime: string; kind: 'abnormal' | 'ng'; note?: string; }
+  const lossIntervals: LossInterval[] = [];
+  const processedKeys = new Set<string>();
+
+  logs.forEach(log => {
+    const msg = log.message || '';
+
+    // 1. NG Resolved log: e.g. "[NG RESOLVED] NG selesai. Start: 14:10 • Stop: 14:25..."
+    if (msg.includes('[NG RESOLVED]')) {
+      const startMatch = msg.match(/Start:\s*(\d{1,2}:\d{2})/i);
+      const stopMatch  = msg.match(/Stop:\s*(\d{1,2}:\d{2})/i);
+      const startTime  = startMatch ? startMatch[1] : log.time;
+      const endTime    = stopMatch ? stopMatch[1] : log.time;
+
+      if (startTime && isTimeInShift(startTime)) {
+        const key = `ng-${startTime}-${endTime}`;
+        if (!processedKeys.has(key)) {
+          processedKeys.add(key);
+          lossIntervals.push({ startTime, endTime, kind: 'ng', note: msg });
+        }
+      }
+      return;
+    }
+
+    // 2. Abnormality Resolved log: e.g. "[RESOLVED] Abnormality resolved. Start Time: 09:15 • Stop Time: 09:40..."
+    if (msg.includes('[RESOLVED]')) {
+      const startMatch = msg.match(/Start\s*(?:Time)?:?\s*(\d{1,2}:\d{2})/i);
+      const stopMatch  = msg.match(/Stop\s*(?:Time)?:?\s*(\d{1,2}:\d{2})/i);
+      const startTime  = startMatch ? startMatch[1] : log.time;
+      const endTime    = stopMatch ? stopMatch[1] : log.time;
+
+      if (startTime && isTimeInShift(startTime)) {
+        const key = `abnormal-${startTime}-${endTime}`;
+        if (!processedKeys.has(key)) {
+          processedKeys.add(key);
+          lossIntervals.push({ startTime, endTime, kind: 'abnormal', note: msg });
+        }
+      }
+      return;
+    }
+
+    // 3. NG Start log: e.g. "[NG START: 14:10 • ONGOING]..."
+    if (msg.includes('[NG START:')) {
+      const startMatch = msg.match(/\[NG\s+START:\s*(\d{1,2}:\d{2})/i);
+      const startTime  = startMatch ? startMatch[1] : log.time;
+
+      const isResolved = logs.some(l => (l.message || '').includes('[NG RESOLVED]') && (l.message || '').includes(startTime));
+
+      if (!isResolved && startTime && isTimeInShift(startTime)) {
+        const key = `ng-${startTime}-ongoing`;
+        if (!processedKeys.has(key)) {
+          processedKeys.add(key);
+          lossIntervals.push({ startTime, endTime: '', kind: 'ng', note: msg });
+        }
+      }
+      return;
+    }
+
+    // 4. Abnormality Start log: e.g. "[START: 09:15 • ONGOING]..."
+    if (msg.includes('[START:') && !msg.includes('[NG START:')) {
+      const startMatch = msg.match(/\[START:\s*(\d{1,2}:\d{2})/i);
+      const startTime  = startMatch ? startMatch[1] : log.time;
+
+      const isResolved = logs.some(l => (l.message || '').includes('[RESOLVED]') && (l.message || '').includes(startTime));
+
+      if (!isResolved && startTime && isTimeInShift(startTime)) {
+        const key = `abnormal-${startTime}-ongoing`;
+        if (!processedKeys.has(key)) {
+          processedKeys.add(key);
+          lossIntervals.push({ startTime, endTime: '', kind: 'abnormal', note: msg });
+        }
+      }
+      return;
+    }
+  });
+
+  // 5. Supplement from context active flags ONLY IF currently active in state right now
+  if (isAbnormalActive && activeAbnormalStart && isTimeInShift(activeAbnormalStart)) {
+    const key = `abnormal-${activeAbnormalStart}-ongoing`;
+    if (!processedKeys.has(key) && !lossIntervals.some(e => e.kind === 'abnormal' && e.startTime === activeAbnormalStart)) {
+      lossIntervals.push({ startTime: activeAbnormalStart, endTime: '', kind: 'abnormal' });
+    }
+  }
+
+  if (isNgActive && activeNgStart && isTimeInShift(activeNgStart)) {
+    const key = `ng-${activeNgStart}-ongoing`;
+    if (!processedKeys.has(key) && !lossIntervals.some(e => e.kind === 'ng' && e.startTime === activeNgStart)) {
+      lossIntervals.push({ startTime: activeNgStart, endTime: '', kind: 'ng' });
+    }
+  }
 
   return (
     <div className="p-5 bg-white border border-slate-200 shadow-sm rounded-xl overflow-hidden mb-6">
@@ -584,7 +696,7 @@ function ShiftTimeline({ shift, jobs, avgJobs, dayOT, nightOT, showDailyAndAct =
                   <span className="absolute left-[-90px] w-[80px] text-[13.5px] font-black text-slate-400 uppercase tracking-wider text-right pr-2 select-none">
                     Act. Prod
                   </span>
-                  <div className="w-full h-10 bg-slate-50/20 border border-slate-200/50 rounded-lg overflow-hidden z-30 shadow-inner relative backdrop-blur-[0.5px]">
+                  <div className="w-full h-10 bg-slate-50/20 border border-slate-200/50 rounded-lg z-30 shadow-inner relative backdrop-blur-[0.5px] overflow-hidden">
                     {allShiftJobs.map((job) => {
                       if (!job.timeRange) return null;
                       if (job.status === 'queued') return null;
@@ -652,18 +764,8 @@ function ShiftTimeline({ shift, jobs, avgJobs, dayOT, nightOT, showDailyAndAct =
                         ? 'drop-shadow-[0_1px_1.5px_rgba(0,0,0,0.85)]' 
                         : 'drop-shadow-[0_1px_1px_rgba(255,255,255,0.8)]';
 
-                      // Determine bar override color based on active state
-                      let fillColor = barColor;
-                      let fillOpacity: string | number = 'opacity-85';
-                      if (job.status === 'running') {
-                        if (isAbnormalActive) {
-                          fillColor = '#ef4444'; // rose-500
-                          fillOpacity = 1;
-                        } else if (isNgActive) {
-                          fillColor = '#f59e0b'; // amber-500
-                          fillOpacity = 1;
-                        }
-                      }
+                      const fillColor = barColor;
+                      const fillOpacity = 'opacity-85';
 
                       return (
                         <React.Fragment key={`act-group-${job.id}`}>
@@ -700,6 +802,34 @@ function ShiftTimeline({ shift, jobs, avgJobs, dayOT, nightOT, showDailyAndAct =
                         </React.Fragment>
                       );
                     })}
+
+                    {/* ── Abnormality (red) & NG (yellow) time-loss overlay bars ── */}
+                    {lossIntervals.map((interval, idx) => {
+                      const startOff = getMinutesOffset(interval.startTime);
+                      const endOff   = interval.endTime
+                        ? getMinutesOffset(interval.endTime)
+                        : (currentTimeStr ? getMinutesOffset(currentTimeStr) : totalMins);
+                      const duration = Math.max(1, endOff - startOff);
+                      if (duration <= 0) return null;
+                      const leftPct  = (startOff / totalMins) * 100;
+                      const widthPct = (duration  / totalMins) * 100;
+                      const isAbn    = interval.kind === 'abnormal';
+                      const still    = !interval.endTime;
+                      return (
+                        <div
+                          key={`loss-${idx}`}
+                          className={`absolute top-0 bottom-0 z-40 pointer-events-auto transition-all ${
+                            still ? 'animate-pulse' : ''
+                          }`}
+                          style={{
+                            left: `${leftPct}%`,
+                            width: `${widthPct}%`,
+                            backgroundColor: isAbn ? 'rgba(239, 68, 68, 0.75)' : 'rgba(245, 158, 11, 0.75)',
+                          }}
+                          title={`${isAbn ? 'Abnormality' : 'NG Quality'}: ${interval.startTime} - ${interval.endTime || 'Ongoing'} (${duration} mins)\n${interval.note || ''}`}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
               </>
@@ -731,6 +861,7 @@ export function MachinePatternView({ machine, factory, selectedDate }: MachinePa
   const {
     jobs,
     avgJobs,
+    logList,
     dayOT,
     nightOT,
     reorderMachineJobs,
@@ -738,7 +869,9 @@ export function MachinePatternView({ machine, factory, selectedDate }: MachinePa
     updateJobStatus,
     updateOTSettings,
     isAbnormalActive,
-    isNgActive
+    activeAbnormalStart,
+    isNgActive,
+    activeNgStart
   } = useProduction(machineKey, activeDate);
 
   const dayJobs = React.useMemo(() => jobs.filter(j => j.shift === 'day'), [jobs]);
@@ -1234,8 +1367,8 @@ export function MachinePatternView({ machine, factory, selectedDate }: MachinePa
 
         {/* Horizontal Timelines (Plan & Act Bar Charts) */}
         <div className="grid grid-cols-1 gap-6">
-          <ShiftTimeline shift="day" jobs={jobs} avgJobs={avgJobs} dayOT={dayOT} nightOT={nightOT} showDailyAndAct={showDailyAndAct} isToday={isToday} isAbnormalActive={isAbnormalActive} isNgActive={isNgActive} />
-          <ShiftTimeline shift="night" jobs={jobs} avgJobs={avgJobs} dayOT={dayOT} nightOT={nightOT} showDailyAndAct={showDailyAndAct} isToday={isToday} isAbnormalActive={isAbnormalActive} isNgActive={isNgActive} />
+          <ShiftTimeline shift="day" jobs={jobs} avgJobs={avgJobs} dayOT={dayOT} nightOT={nightOT} showDailyAndAct={showDailyAndAct} isToday={isToday} isAbnormalActive={isAbnormalActive} isNgActive={isNgActive} logs={logList} activeAbnormalStart={activeAbnormalStart} activeNgStart={activeNgStart} />
+          <ShiftTimeline shift="night" jobs={jobs} avgJobs={avgJobs} dayOT={dayOT} nightOT={nightOT} showDailyAndAct={showDailyAndAct} isToday={isToday} isAbnormalActive={isAbnormalActive} isNgActive={isNgActive} logs={logList} activeAbnormalStart={activeAbnormalStart} activeNgStart={activeNgStart} />
         </div>
 
         {!showDailyAndAct ? (
