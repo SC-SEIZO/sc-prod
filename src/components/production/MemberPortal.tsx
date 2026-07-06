@@ -20,6 +20,7 @@ import { useUserRole } from '../../context/UserContext';
 import { MachineExecutionView } from './MachineExecutionView';
 import { MachinePatternView } from './MachinePatternView';
 import { MachinePartListView } from './MachinePartListView';
+import { TabletControls } from '../layout/TabletControls';
 import { getTodayDateString } from '../../context/ProductionContext';
 import { getMemberPin } from '../../lib/utils';
 
@@ -434,26 +435,26 @@ export function MemberPortal() {
           </div>
 
           <div className="h-9 w-px bg-slate-200 shrink-0 mx-0.5 hidden lg:block"></div>
-
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <TabletControls variant="light" compact={true} />
             <button
               onClick={handleLogout}
-              className="h-9 flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-600 font-bold text-[10px] sm:text-[10.5px] uppercase tracking-wider cursor-pointer transition-colors shadow-sm bg-white"
+              className="h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-600 font-bold text-[10.5px] uppercase tracking-wider cursor-pointer transition-colors shadow-sm bg-white"
               title="Switch to another machine"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden lg:inline">Switch Machine</span>
-              <span className="hidden sm:inline lg:hidden">Switch</span>
+              <span className="hidden xl:inline">Switch Machine</span>
+              <span className="hidden sm:inline xl:hidden">Switch</span>
             </button>
 
             <button
               onClick={() => setRole('guest')}
-              className="h-9 flex items-center justify-center gap-1.5 px-2 sm:px-3 rounded-lg border border-slate-250 hover:bg-slate-50 text-slate-600 font-bold text-[10px] sm:text-[10.5px] uppercase tracking-wider cursor-pointer transition-colors shadow-sm bg-white"
+              className="h-9 flex items-center justify-center gap-1.5 px-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-[10.5px] uppercase tracking-wider cursor-pointer transition-colors shadow-sm bg-white"
               title="Return to entrance portal"
             >
               <UserCog className="w-3.5 h-3.5" />
-              <span className="hidden lg:inline">Exit Member</span>
-              <span className="hidden sm:inline lg:hidden">Exit</span>
+              <span className="hidden xl:inline">Exit Member</span>
+              <span className="hidden sm:inline xl:hidden">Exit</span>
             </button>
           </div>
         </div>

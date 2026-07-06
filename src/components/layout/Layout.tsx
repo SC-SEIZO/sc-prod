@@ -3,6 +3,8 @@ import { Sidebar } from './Sidebar';
 import { Menu } from 'lucide-react';
 import { useDbConnection } from '../../context/DatabaseConnectionContext';
 
+import { TabletControls } from './TabletControls';
+
 interface LayoutProps {
   children: React.ReactNode;
   currentView: string;
@@ -52,6 +54,9 @@ export function Layout({ children, currentView, onChangeView }: LayoutProps) {
           </div>
             
           <div className="flex items-center space-x-3 sm:space-x-5 shrink-0">
+            {/* Tablet Mode Standby & Fullscreen Controls */}
+            <TabletControls />
+
             <div className="hidden sm:flex space-x-3 items-center">
               {/* Live DB Connection Status Badge */}
               {dbStatus === 'checking' && (

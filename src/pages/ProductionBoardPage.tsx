@@ -6,6 +6,7 @@ import { useParts } from '../context/PartsContext';
 import { useUserRole } from '../context/UserContext';
 import { PLANT_LAYOUT } from '../data/machineLayout';
 import { InjectionMoldingIcon } from './ProductionPage';
+import { TabletControls } from '../components/layout/TabletControls';
 
 type MachineStatus = 'running' | 'dandori' | 'ng' | 'abnormal' | 'abnormal-critical' | 'idle';
 
@@ -221,6 +222,7 @@ export function ProductionBoardPage() {
         </div>
 
         <div className="flex items-center gap-4 shrink-0">
+          <TabletControls />
           <div className="text-right">
             <div className="text-xl font-black font-mono tracking-widest leading-none drop-shadow-sm">{timeStr}</div>
             <div className="text-[9px] font-bold uppercase tracking-wider text-white/80 mt-1">{dateStr}</div>
