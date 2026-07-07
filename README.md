@@ -1,20 +1,48 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Production Planning & Shopfloor Execution Integration System (SC-PROD)
 
-# Run and deploy your AI Studio app
+Sistem Pemantauan Rencana Produksi & Eksekusi Shopfloor Realtime berbasis Web Kiosk Tablet.
 
-This contains everything you need to run your app locally.
+---
 
-View your app in AI Studio: https://ai.studio/apps/dca9f2e8-abba-4473-afd3-f0448b516190
+## 📚 Dokumentasi Developer & Handover
 
-## Run Locally
+Untuk kemudahan handover ke pengembang (developer) selanjutnya, dokumentasi sistem telah disusun secara lengkap:
 
-**Prerequisites:**  Node.js
+- 📖 **[Dokumentasi Arsitektur & API Reference (Handover Guide)](./API_AND_SYSTEM_HANDOVER.md)** — Berisi spesifikasi lengkap endpoint `/api`, skema database Supabase, algoritma keamanan PIN, integrasi AI Gemini, dan mekanik Always-Awake tablet.
+- 🤝 **[Panduan Kontribusi & Git Workflow](./CONTRIBUTING.md)** — Berisi aturan branch (`feature/`, `fix/`), konvensi commit, dan prosedur Pull Request.
 
+---
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 🚀 Cara Menjalankan Lokal
+
+### Prasyarat:
+- Node.js (v18+)
+- npm / yarn
+
+### Langkah-langkah:
+1. Clone repositori & install dependensi:
+   ```bash
+   git clone https://github.com/AKErikanoori/Production-Planning-Integration-System.git
+   cd Production-Planning-Integration-System
+   npm install
+   ```
+
+2. Salin environment template:
+   ```bash
+   cp .env.example .env
+   ```
+   *Isi file `.env` dengan kredensial Supabase & Gemini API Key.*
+
+3. Jalankan server development lokal:
+   ```bash
+   npm run dev
+   ```
+
+---
+
+## 🛠️ Fitur-Fitur Utama
+- 📺 **Shopfloor Tablet Mode (Always-Awake)**: Mencegah layar tablet Android masuk ke mode *sleep* secara otomatis 24/7.
+- ⚡ **Realtime Broadcast Sync**: Perubahan progress produksi ter-sync secara instan ke seluruh monitor shopfloor via Supabase Realtime.
+- 🖨️ **Bluetooth Thermal Printer Integration**: Kuncian koneksi printer label Kanban sebelum produksi dimulai.
+- 🤖 **AI Order Extractor**: Ekstraksi dokumen SPK/PO otomatis menggunakan Google Gemini 3.5 Flash.
+- 🔐 **Security PIN Hashing**: Pengamanan PIN Leader menggunakan algoritma `scrypt` dan perlindungan *timing attack*.
