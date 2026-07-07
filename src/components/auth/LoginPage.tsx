@@ -179,7 +179,6 @@ export function LoginPage() {
   // Operator Console Login States
   const [pin, setPin] = useState('');
   const [memberName, setMemberName] = useState('');
-  const [showPinRefTable, setShowPinRefTable] = useState(false);
   const [selectedFactory, setSelectedFactory] = useState(() => {
     const saved = localStorage.getItem('sugity_member_machine_login') || localStorage.getItem('sugity_operator_machine_login');
     if (saved) {
@@ -203,6 +202,29 @@ export function LoginPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const isInitialSyncRef = React.useRef(true);
 
+  // Rate-limiting and lockout states managed purely in-memory
+  const [deviceFailedAttempts, setDeviceFailedAttempts] = useState(0);
+  const [deviceLockoutTime, setDeviceLockoutTime] = useState<number | null>(null);
+  const [memberFailedAttempts, setMemberFailedAttempts] = useState(0);
+  const [memberLockoutTime, setMemberLockoutTime] = useState<number | null>(null);
+  const [countdown, setCountdown] = useState(0);
+
+  // Retrieve active lockout remaining seconds from server on component mount
+  useEffect(() => {
+    fetch('/api/auth/rate-limit-status')
+      .then(res => res.json())
+      .then(data => {
+        const now = Date.now();
+        if (data.deviceLockoutRemaining > 0) {
+          setDeviceLockoutTime(now + data.deviceLockoutRemaining * 1000);
+        }
+        if (data.memberLockoutRemaining > 0) {
+          setMemberLockoutTime(now + data.memberLockoutRemaining * 1000);
+        }
+      })
+      .catch(err => console.error('Failed to fetch rate limit status:', err));
+  }, []);
+
   // Sync selected machine when factory changes
   useEffect(() => {
     if (isInitialSyncRef.current) {
@@ -215,14 +237,67 @@ export function LoginPage() {
     }
   }, [selectedFactory]);
 
+  // Lockout countdown timer
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    const updateCountdown = () => {
+      const now = Date.now();
+      const activeLockout = deviceLockoutTime || memberLockoutTime;
+      if (activeLockout) {
+        const remaining = Math.max(0, Math.ceil((activeLockout - now) / 1000));
+        setCountdown(remaining);
+        if (remaining <= 0) {
+          if (deviceLockoutTime) {
+            setDeviceLockoutTime(null);
+            setDeviceFailedAttempts(0);
+          }
+          if (memberLockoutTime) {
+            setMemberLockoutTime(null);
+            setMemberFailedAttempts(0);
+          }
+        } else {
+          timer = setTimeout(updateCountdown, 1000);
+        }
+      } else {
+        setCountdown(0);
+      }
+    };
+    
+    updateCountdown();
+    return () => clearTimeout(timer);
+  }, [deviceLockoutTime, memberLockoutTime]);
+
   const handleDeviceLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    
+    if (deviceLockoutTime && Date.now() < deviceLockoutTime) {
+      const rem = Math.ceil((deviceLockoutTime - Date.now()) / 1000);
+      setErrorMsg(`Too many failed attempts. Locked out. Try again in ${rem}s.`);
+      return;
+    }
+    
     setIsLoggingIn(true);
     try {
       await loginSystem(email, password);
+      setDeviceFailedAttempts(0);
+      setDeviceLockoutTime(null);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Incorrect credentials.');
+      const errMsg = err.message || '';
+      if (errMsg.includes('Locked out')) {
+        setDeviceLockoutTime(Date.now() + 60000);
+        setErrorMsg(errMsg);
+      } else {
+        const nextAttempts = deviceFailedAttempts + 1;
+        setDeviceFailedAttempts(nextAttempts);
+        if (nextAttempts >= 5) {
+          const lockUntil = Date.now() + 60000;
+          setDeviceLockoutTime(lockUntil);
+          setErrorMsg('Too many failed attempts. Locked out for 60 seconds.');
+        } else {
+          setErrorMsg(`${errMsg} (Attempt ${nextAttempts}/5)`);
+        }
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -271,31 +346,69 @@ export function LoginPage() {
     setErrorMsg('');
 
     if (selectedPortal === 'member') {
+      if (memberLockoutTime && Date.now() < memberLockoutTime) {
+        const rem = Math.ceil((memberLockoutTime - Date.now()) / 1000);
+        setErrorMsg(`Too many failed attempts. Locked out. Try again in ${rem}s.`);
+        return;
+      }
+
       if (!memberName.trim()) {
         setErrorMsg('Member Name is required.');
         return;
       }
 
-      const expectedPin = getMemberPin(selectedFactory, selectedMachineId);
-      if (pin.trim().toUpperCase() !== expectedPin) {
-        setErrorMsg(`Incorrect Member PIN.`);
-        return;
-      }
+      setIsLoggingIn(true);
+      try {
+        const res = await fetch('/api/auth/verify-member-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            factory: selectedFactory,
+            machineId: selectedMachineId,
+            pin: pin
+          })
+        });
 
-      const factoryData = FACTORY_DATA.find(f => f.name === selectedFactory);
-      const machine = factoryData?.machines.find(m => m.id === selectedMachineId);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const errMsg = body.error || 'PIN verification failed.';
+          
+          if (errMsg.includes('Locked out')) {
+            setMemberLockoutTime(Date.now() + 60000);
+            throw new Error(errMsg);
+          } else {
+            const nextAttempts = memberFailedAttempts + 1;
+            setMemberFailedAttempts(nextAttempts);
+            if (nextAttempts >= 5) {
+              setMemberLockoutTime(Date.now() + 60000);
+              throw new Error('Too many failed attempts. Locked out for 60 seconds.');
+            } else {
+              throw new Error(`${errMsg}`);
+            }
+          }
+        }
 
-      if (machine) {
-        const loginDetails = {
-          factory: selectedFactory,
-          id: selectedMachineId,
-          tonnage: machine.tonnage,
-          memberName: memberName.trim(),
-          loginTimestamp: Date.now()
-        };
-        localStorage.setItem('sugity_member_machine_login', JSON.stringify(loginDetails));
-        localStorage.removeItem('sugity_operator_machine_login'); // clean up old key
-        setRole('member');
+        const factoryData = FACTORY_DATA.find(f => f.name === selectedFactory);
+        const machine = factoryData?.machines.find(m => m.id === selectedMachineId);
+
+        if (machine) {
+          const loginDetails = {
+            factory: selectedFactory,
+            id: selectedMachineId,
+            tonnage: machine.tonnage,
+            memberName: memberName.trim(),
+            loginTimestamp: Date.now()
+          };
+          localStorage.setItem('sugity_member_machine_login', JSON.stringify(loginDetails));
+          localStorage.removeItem('sugity_operator_machine_login'); // clean up old key
+          setMemberFailedAttempts(0);
+          setMemberLockoutTime(null);
+          setRole('member');
+        }
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Verification failed.');
+      } finally {
+        setIsLoggingIn(false);
       }
     }
   };
@@ -439,7 +552,7 @@ export function LoginPage() {
 
               <button
                 type="submit"
-                disabled={isLoggingIn}
+                disabled={isLoggingIn || !!(deviceLockoutTime && Date.now() < deviceLockoutTime)}
                 className={`w-full py-3.5 text-white font-black uppercase text-sm rounded-xl shadow-lg transition-all active:scale-[0.98] tracking-widest flex items-center justify-center gap-2 cursor-pointer ${styles.buttonBg} disabled:opacity-50 disabled:cursor-not-allowed mt-2`}
               >
                 {isLoggingIn ? (
@@ -589,18 +702,10 @@ export function LoginPage() {
                   maxLength={4}
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
-                  className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.inputBorder} ${styles.focusBorder} ${styles.inputText} font-mono font-black rounded-xl outline-none text-center text-lg tracking-widest transition-all shadow-inner`}
+                  disabled={!!(memberLockoutTime && Date.now() < memberLockoutTime)}
+                  className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.inputBorder} ${styles.focusBorder} ${styles.inputText} font-mono font-black rounded-xl outline-none text-center text-lg tracking-widest transition-all shadow-inner disabled:opacity-50`}
                   required
                 />
-                <span className={`text-[10px] font-bold block mt-1.5 text-center uppercase tracking-wider ${styles.textDesc}`}>
-                  <button
-                    type="button"
-                    onClick={() => setShowPinRefTable(true)}
-                    className="text-emerald-500 hover:text-emerald-600 font-extrabold underline cursor-pointer inline-flex items-center gap-1"
-                  >
-                    <FileText className="w-3.5 h-3.5" /> View PIN Reference Table
-                  </button>
-                </span>
               </div>
 
               {errorMsg && (
@@ -621,7 +726,8 @@ export function LoginPage() {
 
                 <button
                   type="submit"
-                  className={`flex-1 py-3.5 text-white font-black uppercase text-sm rounded-xl shadow-lg transition-all active:scale-[0.98] tracking-widest flex items-center justify-center gap-2 cursor-pointer ${styles.buttonBg}`}
+                  disabled={!!(memberLockoutTime && Date.now() < memberLockoutTime)}
+                  className={`flex-1 py-3.5 text-white font-black uppercase text-sm rounded-xl shadow-lg transition-all active:scale-[0.98] tracking-widest flex items-center justify-center gap-2 cursor-pointer ${styles.buttonBg} disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   <Unlock className="w-4 h-4" /> Enter Portal
                 </button>
@@ -631,57 +737,6 @@ export function LoginPage() {
         )}
 
       </div>
-
-      {/* PIN REFERENCE MODAL */}
-      {showPinRefTable && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[80vh] animate-in fade-in zoom-in-95 duration-200 text-left">
-            <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-950">
-              <h3 className="font-black text-white uppercase text-xs tracking-wider flex items-center gap-2">
-                <FileText className="w-4 h-4 text-emerald-400" />
-                Member PIN Guide Table
-              </h3>
-              <button
-                onClick={() => setShowPinRefTable(false)}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              <table className="w-full text-left border-collapse text-[10px] sm:text-xs">
-                <thead>
-                  <tr className="border-b border-white/10 text-slate-400 font-bold uppercase tracking-wider">
-                    <th className="px-4 py-2 bg-white/5">Factory</th>
-                    <th className="px-4 py-2 bg-white/5">Machine</th>
-                    <th className="px-4 py-2 bg-white/5 text-right">PIN Code</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {FACTORY_DATA.map(f =>
-                    f.machines.map((m, idx) => {
-                      const pinCode = getMemberPin(f.name, m.id);
-                      return (
-                        <tr key={`${f.name}-${m.id}`} className="border-b border-white/5 hover:bg-white/5 text-slate-350">
-                          {idx === 0 ? (
-                            <td className="px-4 py-2 font-bold text-white align-top bg-slate-950/20" rowSpan={f.machines.length}>
-                              {f.name}
-                            </td>
-                          ) : null}
-                          <td className="px-4 py-2 font-medium">Machine {m.id}</td>
-                          <td className="px-4 py-2 font-mono font-bold text-emerald-400 text-right text-xs sm:text-sm">
-                            {pinCode}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

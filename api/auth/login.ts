@@ -1,4 +1,4 @@
-import { supabaseAdmin, verifyPinHash, signJwt, JWT_SECRET } from '../_lib';
+import { supabaseAdmin, verifyPinHash, signJwt, JWT_SECRET, checkRateLimit, recordFailure, recordSuccess } from '../_lib';
 
 export default async function handler(req: any, res: any) {
   try {
@@ -16,6 +16,13 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+    const rateLimitKey = `device_login:${clientIp}`;
+    const check = checkRateLimit(rateLimitKey);
+    if (!check.allowed) {
+      return res.status(429).json({ error: `Too many login attempts. Locked out. Try again in ${check.remainingSeconds}s.` });
+    }
+
     // Query user by email
     const { data: user, error } = await supabaseAdmin
       .from('users')
@@ -28,16 +35,25 @@ export default async function handler(req: any, res: any) {
     }
 
     if (!user || !user.password_hash) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
+      const limitResult = recordFailure(rateLimitKey);
+      if (limitResult.lockedOut) {
+        return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
+      }
+      return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
     }
 
     // Verify password hash (using the same scrypt check)
     const isMatched = verifyPinHash(password, user.password_hash);
     if (!isMatched) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
+      const limitResult = recordFailure(rateLimitKey);
+      if (limitResult.lockedOut) {
+        return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
+      }
+      return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
     }
 
     // Sign JWT
+    recordSuccess(rateLimitKey);
     const payload = {
       id: user.id,
       email: user.email,

@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
-import { JWT_SECRET, signJwt, verifyJwt, parseCookies } from './api/_lib';
+import { JWT_SECRET, signJwt, verifyJwt, parseCookies, checkRateLimit, recordFailure, recordSuccess, getMemberPin } from './api/_lib';
 
 
 // ---------------------------------------------------------------------------
@@ -189,6 +189,13 @@ async function startServer() {
         return res.status(400).json({ error: 'Email and password are required.' });
       }
 
+      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+      const rateLimitKey = `device_login:${clientIp}`;
+      const check = checkRateLimit(rateLimitKey as string);
+      if (!check.allowed) {
+        return res.status(429).json({ error: `Too many login attempts. Locked out. Try again in ${check.remainingSeconds}s.` });
+      }
+
       const { data: user, error } = await supabaseAdmin!
         .from('users')
         .select('id, email, role, name, password_hash')
@@ -197,13 +204,23 @@ async function startServer() {
 
       if (error) return res.status(500).json({ error: error.message });
       if (!user || !user.password_hash) {
-        return res.status(401).json({ error: 'Invalid email or password.' });
+        const limitResult = recordFailure(rateLimitKey as string);
+        if (limitResult.lockedOut) {
+          return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
+        }
+        return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
       }
 
       const isMatched = verifyPinHash(password, user.password_hash);
       if (!isMatched) {
-        return res.status(401).json({ error: 'Invalid email or password.' });
+        const limitResult = recordFailure(rateLimitKey as string);
+        if (limitResult.lockedOut) {
+          return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
+        }
+        return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
       }
+
+      recordSuccess(rateLimitKey as string);
 
       const payload = {
         id: user.id,
@@ -235,6 +252,60 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('[/api/auth/login] Error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/auth/verify-member-pin: verify member PIN with server-side rate-limiting
+  app.post('/api/auth/verify-member-pin', (req, res) => {
+    try {
+      const { factory, machineId, pin } = req.body;
+
+      if (!factory || !machineId || !pin) {
+        return res.status(400).json({ error: 'Factory, Machine ID, and PIN are required.' });
+      }
+
+      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+      const rateLimitKey = `member_login:${clientIp}`;
+
+      // Check rate limit
+      const check = checkRateLimit(rateLimitKey as string);
+      if (!check.allowed) {
+        return res.status(429).json({ error: `Too many login attempts. Locked out. Try again in ${check.remainingSeconds}s.` });
+      }
+
+      const expectedPin = getMemberPin(factory, machineId);
+      if (pin.trim().toUpperCase() !== expectedPin) {
+        const limitResult = recordFailure(rateLimitKey as string);
+        if (limitResult.lockedOut) {
+          return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
+        }
+        return res.status(401).json({ error: `Incorrect Member PIN. (${limitResult.attempts}/5 attempts)` });
+      }
+
+      // Success! Reset attempts
+      recordSuccess(rateLimitKey as string);
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('[/api/auth/verify-member-pin] Error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/auth/rate-limit-status: check rate limit status for current IP
+  app.get('/api/auth/rate-limit-status', (req, res) => {
+    try {
+      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+      const deviceCheck = checkRateLimit(`device_login:${clientIp}`);
+      const memberCheck = checkRateLimit(`member_login:${clientIp}`);
+
+      res.json({
+        deviceLockoutRemaining: deviceCheck.allowed ? 0 : deviceCheck.remainingSeconds,
+        memberLockoutRemaining: memberCheck.allowed ? 0 : memberCheck.remainingSeconds
+      });
+    } catch (err: any) {
+      console.error('[/api/auth/rate-limit-status] Error:', err);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
