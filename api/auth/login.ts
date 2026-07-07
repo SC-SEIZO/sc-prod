@@ -1,4 +1,4 @@
-import { supabaseAdmin, verifyPinHash, signJwt, JWT_SECRET, checkRateLimit, recordFailure, recordSuccess } from '../_lib';
+import { supabaseAdmin, verifyPinHash, signJwt, JWT_SECRET, checkRateLimit, recordFailure, recordSuccess, getClientIp } from '../_lib';
 
 export default async function handler(req: any, res: any) {
   try {
@@ -16,7 +16,7 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+    const clientIp = getClientIp(req);
     const rateLimitKey = `device_login:${clientIp}`;
     const check = checkRateLimit(rateLimitKey);
     if (!check.allowed) {

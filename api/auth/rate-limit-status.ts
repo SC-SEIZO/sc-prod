@@ -1,4 +1,4 @@
-import { checkRateLimit } from '../_lib';
+import { checkRateLimit, getClientIp } from '../_lib';
 
 export default async function handler(req: any, res: any) {
   try {
@@ -6,7 +6,7 @@ export default async function handler(req: any, res: any) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+    const clientIp = getClientIp(req);
     const deviceCheck = checkRateLimit(`device_login:${clientIp}`);
     const memberCheck = checkRateLimit(`member_login:${clientIp}`);
 

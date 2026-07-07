@@ -1,4 +1,4 @@
-import { getMemberPin, checkRateLimit, recordFailure, recordSuccess } from '../_lib';
+import { getMemberPin, checkRateLimit, recordFailure, recordSuccess, getClientIp } from '../_lib';
 
 export default async function handler(req: any, res: any) {
   try {
@@ -12,7 +12,7 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Factory, Machine ID, and PIN are required.' });
     }
 
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+    const clientIp = getClientIp(req);
     const rateLimitKey = `member_login:${clientIp}`;
     
     // Check rate limit

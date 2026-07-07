@@ -214,3 +214,13 @@ export function getMemberPin(factoryName: string, machineId: string): string {
   return fullPin.substring(0, 4);
 }
 
+// --- Helper to safely parse client IP in serverless and Express environments ---
+export function getClientIp(req: any): string {
+  if (req.headers && req.headers['x-forwarded-for']) {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (Array.isArray(forwarded)) return forwarded[0];
+    return String(forwarded).split(',')[0].trim();
+  }
+  return req.ip || req.socket?.remoteAddress || 'unknown-ip';
+}
+

@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
-import { JWT_SECRET, signJwt, verifyJwt, parseCookies, checkRateLimit, recordFailure, recordSuccess, getMemberPin } from './api/_lib';
+import { JWT_SECRET, signJwt, verifyJwt, parseCookies, checkRateLimit, recordFailure, recordSuccess, getMemberPin, getClientIp } from './api/_lib';
 
 
 // ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Email and password are required.' });
       }
 
-      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+      const clientIp = getClientIp(req);
       const rateLimitKey = `device_login:${clientIp}`;
       const check = checkRateLimit(rateLimitKey as string);
       if (!check.allowed) {
@@ -265,7 +265,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Factory, Machine ID, and PIN are required.' });
       }
 
-      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+      const clientIp = getClientIp(req);
       const rateLimitKey = `member_login:${clientIp}`;
 
       // Check rate limit
@@ -296,7 +296,7 @@ async function startServer() {
   // GET /api/auth/rate-limit-status: check rate limit status for current IP
   app.get('/api/auth/rate-limit-status', (req, res) => {
     try {
-      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+      const clientIp = getClientIp(req);
       const deviceCheck = checkRateLimit(`device_login:${clientIp}`);
       const memberCheck = checkRateLimit(`member_login:${clientIp}`);
 
