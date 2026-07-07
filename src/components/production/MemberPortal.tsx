@@ -191,97 +191,97 @@ export function MemberPortal() {
   // Render Login Card
   if (!loggedInMachine) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black p-4 select-none relative overflow-y-auto">
+      <div className="min-h-screen w-full flex items-center justify-center bg-slate-100 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-white via-slate-100 to-slate-200 p-4 select-none relative overflow-y-auto">
         <div className="absolute top-6 left-6 flex items-center gap-3">
           <div className="w-[78px] h-[51px] flex items-center justify-center shrink-0">
             <img src="/logo.png" alt="SC Logo" className="max-h-full max-w-full object-contain" />
           </div>
           <div className="flex flex-col text-left">
-            <span className="text-white text-xs font-black tracking-tight uppercase leading-none mb-0.5">PT. SUGITY CREATIVES</span>
-            <span className="text-emerald-400 text-[8px] font-bold tracking-widest uppercase leading-none">Shopfloor Member Console</span>
+            <span className="text-slate-800 text-xs font-black tracking-tight uppercase leading-none mb-0.5">PT. SUGITY CREATIVES</span>
+            <span className="text-[#008d51] text-[8px] font-bold tracking-widest uppercase leading-none">Shopfloor Member Console</span>
           </div>
         </div>
 
         <div className="absolute top-6 right-6 flex items-center gap-2">
           <button
             onClick={() => setShowPinRefTable(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase rounded-lg tracking-wider transition-all duration-200 cursor-pointer shadow-sm animate-pulse"
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-250 text-[#008d51] text-[10px] font-black uppercase rounded-lg tracking-wider transition-all duration-200 cursor-pointer shadow-sm animate-pulse"
           >
             <FileText className="w-3.5 h-3.5" /> PIN Table
           </button>
           <button
             onClick={() => setRole('guest')}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/10 text-white hover:text-white text-[10px] font-black uppercase rounded-lg tracking-wider transition-all duration-200 cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-650 hover:text-slate-800 text-[10px] font-black uppercase rounded-lg tracking-wider transition-all duration-200 cursor-pointer shadow-sm"
           >
             <UserCog className="w-3.5 h-3.5" /> Entrance Portal
           </button>
         </div>
 
-        <div className="w-full max-w-md bg-white/5 border border-white/10 backdrop-blur-xl rounded-2xl shadow-2xl p-8 flex flex-col space-y-5 relative overflow-hidden mt-12 sm:mt-0">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl"></div>
+        <div className="w-full max-w-md bg-white border border-slate-200/80 rounded-2xl shadow-xl p-8 flex flex-col space-y-5 relative overflow-hidden mt-12 sm:mt-0">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl"></div>
           
           <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto text-[#008d51] shadow-[0_0_15px_rgba(0,141,81,0.1)]">
               <Lock className="w-5 h-5 stroke-[2.5]" />
             </div>
-            <h2 className="text-lg font-black text-white uppercase tracking-wider">Member Machine Auth</h2>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Select your machine and enter credentials</p>
+            <h2 className="text-lg font-black text-slate-800 uppercase tracking-wider">Member Machine Auth</h2>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Select your machine and enter credentials</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4 text-left">
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Select Factory</label>
+              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Select Factory</label>
               <select
                 value={selectedFactory}
                 onChange={(e) => setSelectedFactory(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-950 border border-white/15 focus:border-emerald-500 text-white font-bold rounded-xl outline-none text-xs transition-colors appearance-none cursor-pointer"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 focus:border-emerald-600 text-slate-800 font-bold rounded-xl outline-none text-xs transition-colors appearance-none cursor-pointer"
               >
                 {FACTORY_DATA.map(f => (
-                  <option key={f.name} value={f.name} className="bg-slate-950 text-white">{f.label}</option>
+                  <option key={f.name} value={f.name} className="bg-white text-slate-800">{f.label}</option>
                 ))}
               </select>
             </div>
 
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Select Machine</label>
+              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Select Machine</label>
               <select
                 value={selectedMachineId}
                 onChange={(e) => setSelectedMachineId(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-950 border border-white/15 focus:border-emerald-500 text-white font-bold rounded-xl outline-none text-xs transition-colors appearance-none cursor-pointer"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 focus:border-emerald-600 text-slate-800 font-bold rounded-xl outline-none text-xs transition-colors appearance-none cursor-pointer"
               >
                 {activeFactoryData?.machines.map(m => (
-                  <option key={m.id} value={m.id} className="bg-slate-950 text-white">Machine {m.id} ({m.tonnage})</option>
+                  <option key={m.id} value={m.id} className="bg-white text-slate-800">Machine {m.id} ({m.tonnage})</option>
                 ))}
               </select>
             </div>
 
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Member Name</label>
+              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Member Name</label>
               <input
                 type="text"
                 placeholder="Enter your name"
                 value={memberName}
                 onChange={(e) => setMemberName(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-950 border border-white/15 focus:border-emerald-500 text-white font-bold rounded-xl outline-none text-xs transition-colors shadow-inner"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 focus:border-emerald-600 text-slate-800 font-bold rounded-xl outline-none text-xs transition-colors shadow-inner"
                 required
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Member PIN</label>
+              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Member PIN</label>
               <input
                 type="password"
                 maxLength={4}
                 placeholder="••••"
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-950 border border-white/15 focus:border-emerald-500 text-white font-mono font-black rounded-xl outline-none text-center text-base tracking-widest transition-all shadow-inner"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 focus:border-emerald-600 text-slate-800 font-mono font-black rounded-xl outline-none text-center text-base tracking-widest transition-all shadow-inner"
                 required
               />
             </div>
 
             {errorMsg && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2">
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
                 {errorMsg}
               </div>
@@ -289,7 +289,7 @@ export function MemberPortal() {
 
             <button
               type="submit"
-              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-xs rounded-xl shadow-lg transition-transform active:scale-[0.98] tracking-widest flex items-center justify-center gap-2 cursor-pointer mt-6"
+              className="w-full py-3.5 bg-[#008d51] hover:bg-[#007038] text-white font-black uppercase text-xs rounded-xl shadow-lg transition-transform active:scale-[0.98] tracking-widest flex items-center justify-center gap-2 cursor-pointer mt-6"
             >
               <Unlock className="w-4 h-4" /> Access Machine Console
             </button>
@@ -298,16 +298,16 @@ export function MemberPortal() {
 
         {/* PIN REFERENCE MODAL */}
         {showPinRefTable && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-            <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-200">
-              <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-950">
-                <h3 className="font-black text-white uppercase text-xs tracking-wider flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-emerald-400" />
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-200">
+              <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                <h3 className="font-black text-slate-800 uppercase text-xs tracking-wider flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-[#008d51]" />
                   Member PIN Guide Table
                 </h3>
                 <button 
                   onClick={() => setShowPinRefTable(false)} 
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer transition-colors"
+                  className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -315,11 +315,11 @@ export function MemberPortal() {
               <div className="flex-1 overflow-y-auto p-4">
                 <table className="w-full text-left border-collapse text-[10px] sm:text-xs">
                   <thead>
-                    <tr className="border-b border-white/10 text-slate-400 font-bold uppercase tracking-wider">
-                      <th className="px-4 py-2 bg-white/5">Factory</th>
-                      <th className="px-4 py-2 bg-white/5">Machine</th>
-                      <th className="px-4 py-2 bg-white/5">Tonnage</th>
-                      <th className="px-4 py-2 bg-white/5 text-right">PIN Code</th>
+                    <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                      <th className="px-4 py-2 bg-slate-50/50">Factory</th>
+                      <th className="px-4 py-2 bg-slate-50/50">Machine</th>
+                      <th className="px-4 py-2 bg-slate-50/50">Tonnage</th>
+                      <th className="px-4 py-2 bg-slate-50/50 text-right">PIN Code</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -327,15 +327,15 @@ export function MemberPortal() {
                       f.machines.map((m, idx) => {
                         const pinCode = getMemberPin(f.name, m.id);
                         return (
-                          <tr key={`${f.name}-${m.id}`} className="border-b border-white/5 hover:bg-white/5 text-slate-350">
+                          <tr key={`${f.name}-${m.id}`} className="border-b border-slate-100 hover:bg-slate-50 text-slate-600">
                             {idx === 0 ? (
-                              <td className="px-4 py-2 font-bold text-white align-top bg-slate-950/20" rowSpan={f.machines.length}>
+                              <td className="px-4 py-2 font-bold text-slate-800 align-top bg-slate-50" rowSpan={f.machines.length}>
                                 {f.name}
                               </td>
                             ) : null}
                             <td className="px-4 py-2 font-medium">Machine {m.id}</td>
                             <td className="px-4 py-2 opacity-60 font-mono">{m.tonnage}</td>
-                            <td className="px-4 py-2 font-mono font-bold text-emerald-400 text-right text-xs sm:text-sm">
+                            <td className="px-4 py-2 font-mono font-bold text-[#008d51] text-right text-xs sm:text-sm">
                               {pinCode}
                             </td>
                           </tr>

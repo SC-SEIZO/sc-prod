@@ -82,24 +82,24 @@ class ErrorBoundary extends React.Component<
   render() {
     if ((this as any).state.hasError) {
       return (
-        <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 p-6 text-white font-sans text-left select-none">
-          <div className="w-full max-w-3xl bg-slate-900 border border-rose-500/30 rounded-2xl p-8 shadow-2xl space-y-6 relative overflow-hidden">
+        <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-100 p-6 text-slate-800 font-sans text-left select-none">
+          <div className="w-full max-w-3xl bg-white border border-rose-200 rounded-2xl p-8 shadow-2xl space-y-6 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full blur-3xl"></div>
             
-            <div className="flex items-center gap-3 text-rose-500">
-              <span className="w-12 h-12 rounded-xl bg-rose-500/10 flex items-center justify-center text-xl font-bold">⚠️</span>
+            <div className="flex items-center gap-3 text-rose-600">
+              <span className="w-12 h-12 rounded-xl bg-rose-50 flex items-center justify-center text-xl font-bold">⚠️</span>
               <div>
                 <h1 className="text-xl font-black uppercase tracking-wider">Application Runtime Exception</h1>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5">PT. Sugity Creatives Shopfloor Integration</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-0.5">PT. Sugity Creatives Shopfloor Integration</p>
               </div>
             </div>
             
-            <div className="bg-black/50 border border-slate-800 rounded-xl p-4 font-mono text-xs overflow-auto max-h-[350px] text-rose-400 whitespace-pre-wrap leading-relaxed shadow-inner">
-              <div className="font-extrabold text-white text-sm border-b border-slate-800 pb-2 mb-2">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-xs overflow-auto max-h-[350px] text-rose-700 whitespace-pre-wrap leading-relaxed shadow-inner">
+              <div className="font-extrabold text-slate-900 text-sm border-b border-slate-200 pb-2 mb-2">
                 {(this as any).state.error?.name || 'Error'}: {(this as any).state.error?.message}
               </div>
-              <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Stack Trace:</div>
-              <div className="text-slate-400 text-[10px] leading-normal">{(this as any).state.error?.stack || 'No stack trace available'}</div>
+              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Stack Trace:</div>
+              <div className="text-slate-600 text-[10px] leading-normal">{(this as any).state.error?.stack || 'No stack trace available'}</div>
             </div>
 
             <div className="flex gap-4 pt-2">
@@ -116,7 +116,7 @@ class ErrorBoundary extends React.Component<
                 onClick={() => {
                   window.location.reload();
                 }}
-                className="px-5 py-3 bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white text-[10px] font-black uppercase tracking-widest rounded-xl border border-slate-800 transition-all hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer"
+                className="px-5 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 hover:text-slate-900 text-[10px] font-black uppercase tracking-widest rounded-xl border border-slate-350 transition-all hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer"
               >
                 Reload Page
               </button>

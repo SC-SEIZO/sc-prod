@@ -57,13 +57,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   });
 
   // Persistence for app theme
-  const [theme, setThemeState] = useState<AppTheme>(() => {
-    const saved = localStorage.getItem('sugity_active_theme');
-    if (saved === 'sugity' || saved === 'carbon' || saved === 'ocean' || saved === 'sakura' || saved === 'light') {
-      return saved as AppTheme;
-    }
-    return 'sugity'; // Default theme
-  });
+  const [theme, setThemeState] = useState<AppTheme>('light');
 
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [isLeaderDbConnected, setIsLeaderDbConnected] = useState<boolean>(false);
@@ -144,8 +138,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const setTheme = (newTheme: AppTheme) => {
-    setThemeState(newTheme);
-    localStorage.setItem('sugity_active_theme', newTheme);
+    setThemeState('light');
+    localStorage.setItem('sugity_active_theme', 'light');
   };
 
   // Shift cutoff auto-logout checker (Day Shift: 07:00 - 21:00, Night Shift: 21:00 - 07:00)

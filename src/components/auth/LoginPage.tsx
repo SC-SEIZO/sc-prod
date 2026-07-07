@@ -519,67 +519,6 @@ export function LoginPage() {
           </div>
         )}
 
-        {/* Integrated Premium Theme Selector Bar */}
-        <div className="flex flex-col items-center gap-2 pt-6 w-full max-w-lg">
-          <span className={`text-xs font-black uppercase tracking-widest transition-colors ${styles.textDesc}`}>Select Theme Profile</span>
-          <div className={`grid grid-cols-5 gap-1 sm:gap-2 ${styles.badgeBg} border ${styles.badgeBorder} rounded-2xl p-1 sm:p-1.5 backdrop-blur-md shadow-lg w-full`}>
-            <button
-              type="button"
-              onClick={() => setTheme('sugity')}
-              className={`flex items-center justify-center gap-1 sm:gap-2 py-1.5 sm:py-2.5 rounded-xl border transition-all cursor-pointer ${theme === 'sugity'
-                  ? 'border-emerald-500 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-black scale-[1.03] shadow-md shadow-emerald-500/10'
-                  : `border-transparent ${theme === 'light' ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50' : 'text-slate-400 hover:text-white hover:bg-white/5'}`
-                }`}
-            >
-              <span className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] shrink-0"></span>
-              <span className="text-[9px] sm:text-[11px] uppercase tracking-wider font-bold truncate">Sugity</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTheme('carbon')}
-              className={`flex items-center justify-center gap-1 sm:gap-2 py-1.5 sm:py-2.5 rounded-xl border transition-all cursor-pointer ${theme === 'carbon'
-                  ? 'border-amber-500 bg-amber-500/20 text-amber-600 dark:text-amber-500 font-black scale-[1.03] shadow-md shadow-amber-500/10'
-                  : `border-transparent ${theme === 'light' ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50' : 'text-slate-400 hover:text-white hover:bg-white/5'}`
-                }`}
-            >
-              <span className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)] shrink-0"></span>
-              <span className="text-[9px] sm:text-[11px] uppercase tracking-wider font-bold truncate">Carbon</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTheme('ocean')}
-              className={`flex items-center justify-center gap-1 sm:gap-2 py-1.5 sm:py-2.5 rounded-xl border transition-all cursor-pointer ${theme === 'ocean'
-                  ? 'border-cyan-500 bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-black scale-[1.03] shadow-md shadow-cyan-500/10'
-                  : `border-transparent ${theme === 'light' ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50' : 'text-slate-400 hover:text-white hover:bg-white/5'}`
-                }`}
-            >
-              <span className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.5)] shrink-0"></span>
-              <span className="text-[9px] sm:text-[11px] uppercase tracking-wider font-bold truncate">Ocean</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTheme('sakura')}
-              className={`flex items-center justify-center gap-1 sm:gap-2 py-1.5 sm:py-2.5 rounded-xl border transition-all cursor-pointer ${theme === 'sakura'
-                  ? 'border-rose-500 bg-rose-500/20 text-rose-600 dark:text-rose-400 font-black scale-[1.03] shadow-md shadow-rose-500/10'
-                  : `border-transparent ${theme === 'light' ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50' : 'text-slate-400 hover:text-white hover:bg-white/5'}`
-                }`}
-            >
-              <span className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)] shrink-0"></span>
-              <span className="text-[9px] sm:text-[11px] uppercase tracking-wider font-bold truncate">Sakura</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTheme('light')}
-              className={`flex items-center justify-center gap-1 sm:gap-2 py-1.5 sm:py-2.5 rounded-xl border transition-all cursor-pointer ${theme === 'light'
-                  ? 'border-slate-400 bg-white text-slate-800 font-black scale-[1.03] shadow-md shadow-slate-350/20'
-                  : `border-transparent ${theme === 'light' ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50' : 'text-slate-400 hover:text-white hover:bg-white/5'}`
-                }`}
-            >
-              <span className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-slate-300 border border-slate-450 shadow-[0_0_8px_rgba(148,163,184,0.5)] shrink-0"></span>
-              <span className="text-[9px] sm:text-[11px] uppercase tracking-wider font-bold truncate">Light</span>
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* PIN REFERENCE MODAL */}
