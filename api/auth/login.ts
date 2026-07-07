@@ -1,4 +1,97 @@
-import { supabaseAdmin, verifyPinHash, signJwt, JWT_SECRET, checkRateLimit, recordFailure, recordSuccess, getClientIp } from '../_lib';
+import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+const JWT_SECRET = process.env.JWT_SECRET || 'sugity-secret-key-12345!';
+
+let supabaseAdmin: ReturnType<typeof createClient> | null = null;
+try {
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
+} catch (_) {}
+
+function base64url(buf: Buffer): string {
+  return buf.toString('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
+function signJwt(payload: any, secret: string): string {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const part1 = base64url(Buffer.from(JSON.stringify(header)));
+  const part2 = base64url(Buffer.from(JSON.stringify(payload)));
+  const signature = base64url(
+    crypto.createHmac('sha256', secret)
+      .update(part1 + '.' + part2)
+      .digest()
+  );
+  return `${part1}.${part2}.${signature}`;
+}
+
+function verifyPinHash(pin: string, stored: string | null | undefined): boolean {
+  if (!stored || !stored.startsWith('scrypt:')) return false;
+  const [, saltHex, hashHex] = stored.split(':');
+  if (!saltHex || !hashHex) return false;
+  try {
+    const derived = crypto.scryptSync(pin, Buffer.from(saltHex, 'hex'), 64);
+    const expected = Buffer.from(hashHex, 'hex');
+    return derived.length === expected.length && crypto.timingSafeEqual(derived, expected);
+  } catch {
+    return false;
+  }
+}
+
+interface RateLimitInfo {
+  attempts: number;
+  lockoutUntil: number | null;
+}
+
+const globalRateLimits: Record<string, RateLimitInfo> = {};
+
+function checkRateLimit(key: string, maxAttempts = 5, lockoutDuration = 60000) {
+  const now = Date.now();
+  const info = globalRateLimits[key];
+  if (info && info.lockoutUntil && now < info.lockoutUntil) {
+    return { allowed: false, remainingSeconds: Math.ceil((info.lockoutUntil - now) / 1000) };
+  }
+  return { allowed: true, remainingSeconds: 0 };
+}
+
+function recordFailure(key: string, maxAttempts = 5, lockoutDuration = 60000) {
+  const now = Date.now();
+  if (!globalRateLimits[key]) {
+    globalRateLimits[key] = { attempts: 0, lockoutUntil: null };
+  }
+  const info = globalRateLimits[key];
+  if (info.lockoutUntil && now >= info.lockoutUntil) {
+    info.attempts = 0;
+    info.lockoutUntil = null;
+  }
+  info.attempts += 1;
+  if (info.attempts >= maxAttempts) {
+    info.lockoutUntil = now + lockoutDuration;
+    return { lockedOut: true, attempts: info.attempts, remainingAttempts: 0 };
+  }
+  return { lockedOut: false, attempts: info.attempts, remainingAttempts: maxAttempts - info.attempts };
+}
+
+function recordSuccess(key: string) {
+  if (globalRateLimits[key]) {
+    delete globalRateLimits[key];
+  }
+}
+
+function getClientIp(req: any): string {
+  if (req.headers && req.headers['x-forwarded-for']) {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (Array.isArray(forwarded)) return forwarded[0];
+    return String(forwarded).split(',')[0].trim();
+  }
+  return req.ip || req.socket?.remoteAddress || 'unknown-ip';
+}
 
 export default async function handler(req: any, res: any) {
   try {
@@ -24,16 +117,15 @@ export default async function handler(req: any, res: any) {
     }
 
     // Query user by email
-    const { data: user, error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('users')
       .select('id, email, role, name, password_hash')
       .eq('email', email)
       .maybeSingle();
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
+    const user = data as any;
 
+    if (error) return res.status(500).json({ error: error.message });
     if (!user || !user.password_hash) {
       const limitResult = recordFailure(rateLimitKey);
       if (limitResult.lockedOut) {
@@ -42,7 +134,6 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
     }
 
-    // Verify password hash (using the same scrypt check)
     const isMatched = verifyPinHash(password, user.password_hash);
     if (!isMatched) {
       const limitResult = recordFailure(rateLimitKey);
@@ -52,39 +143,38 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
     }
 
-    // Sign JWT
+    // Success! Reset attempts
     recordSuccess(rateLimitKey);
-    const payload = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      name: user.name,
-      timestamp: Date.now()
-    };
-    const token = signJwt(payload, JWT_SECRET);
+
+    // Create session payload
+    const token = signJwt(
+      {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
+      },
+      JWT_SECRET
+    );
 
     // Set cookie
-    const isProd = process.env.NODE_ENV === 'production';
-    const cookieAttrs = [
-      `sugity_session=${token}`,
-      'HttpOnly',
-      'Path=/',
-      'Max-Age=2592000', // 30 days
-      'SameSite=Lax',
-      isProd ? 'Secure' : ''
-    ].filter(Boolean).join('; ');
+    res.setHeader(
+      'Set-Cookie',
+      `sugity_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
+    );
 
-    res.setHeader('Set-Cookie', cookieAttrs);
     return res.json({
       success: true,
       user: {
+        id: user.id,
         email: user.email,
         role: user.role,
         name: user.name
       }
     });
   } catch (err: any) {
-    console.error('[/api/auth/login] Unhandled error:', err);
+    console.error('[/api/auth/login] Error:', err);
     return res.status(500).json({ error: err?.message || 'Internal server error' });
   }
 }
