@@ -380,11 +380,12 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
     }
   };
 
-  // Alarm loop to alert the operator to print the Kanban label once print lock is lifted
+  // Alarm loop to alert the operator to print the Kanban label once print lock is lifted (Member operator role only)
   useEffect(() => {
     let intervalId: any = null;
     
     const shouldAlarm = 
+      role === 'member' &&
       activeJob.status === 'running' && 
       !isNoActiveJob && 
       !printLockStatus.isLocked && 
@@ -407,7 +408,7 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
         clearInterval(intervalId);
       }
     };
-  }, [printLockStatus.isLocked, activeJob.status, isNoActiveJob, showPrintLabel, isAbnormalActive, isNgActive]);
+  }, [role, printLockStatus.isLocked, activeJob.status, isNoActiveJob, showPrintLabel, isAbnormalActive, isNgActive]);
 
   // Active Abnormality & Downtime State Tracking
   const [isResolvingAbnormality, setIsResolvingAbnormality] = useState(false);
