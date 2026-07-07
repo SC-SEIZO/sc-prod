@@ -345,6 +345,70 @@ export function MachineExecutionView({ machine, factory, selectedDate }: Machine
     return { isLocked, message };
   }, [activeJob.status, activeJob.actualProductionStart, activeJob.actualQty, activeJob.downtimeMinutes, activeJob.kav, activeJob.ct, labelQty, currentLiveTime]);
 
+  // Web Audio API helper to play a louder, high-attention warning alarm (alternating square-wave buzzer)
+  const playMachineBeep = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const audioCtx = new AudioContextClass();
+      
+      const playTone = (freq: number, startOffset: number, duration: number) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        osc.type = 'square'; // Square wave has high harmonic presence, sounding like a loud physical buzzer
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + startOffset);
+        
+        gain.gain.setValueAtTime(0, audioCtx.currentTime + startOffset);
+        gain.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + startOffset + 0.01);
+        gain.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + startOffset + duration - 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + startOffset + duration);
+        
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        
+        osc.start(audioCtx.currentTime + startOffset);
+        osc.stop(audioCtx.currentTime + startOffset + duration);
+      };
+      
+      // Loud industrial warning pulse: 3 rapid buzzer bursts (beep-beep-beep)
+      playTone(2200, 0, 0.12);
+      playTone(2200, 0.18, 0.12);
+      playTone(2200, 0.36, 0.12);
+    } catch (err) {
+      console.warn('Could not play machine beep:', err);
+    }
+  };
+
+  // Alarm loop to alert the operator to print the Kanban label once print lock is lifted
+  useEffect(() => {
+    let intervalId: any = null;
+    
+    const shouldAlarm = 
+      activeJob.status === 'running' && 
+      !isNoActiveJob && 
+      !printLockStatus.isLocked && 
+      !showPrintLabel &&
+      !isAbnormalActive &&
+      !isNgActive;
+      
+    if (shouldAlarm) {
+      // Trigger first beep immediately when the machine becomes ready
+      playMachineBeep();
+      
+      // Setup loop to beep every 2.5 seconds until print action begins
+      intervalId = setInterval(() => {
+        playMachineBeep();
+      }, 2500);
+    }
+    
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [printLockStatus.isLocked, activeJob.status, isNoActiveJob, showPrintLabel, isAbnormalActive, isNgActive]);
+
   // Active Abnormality & Downtime State Tracking
   const [isResolvingAbnormality, setIsResolvingAbnormality] = useState(false);
   const [resolutionNote, setResolutionNote] = useState('');
