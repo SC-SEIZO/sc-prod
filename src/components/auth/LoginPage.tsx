@@ -159,10 +159,24 @@ const THEME_STYLES: Record<AppTheme, {
 };
 
 export function LoginPage() {
-  const { setRole, theme, setTheme, verifyLeaderPin } = useUserRole();
-  const [selectedPortal, setSelectedPortal] = useState<'planner' | 'leader' | 'viewer' | 'member' | 'production-board' | null>(null);
+  const { 
+    setRole, 
+    theme, 
+    setTheme, 
+    isAuthenticated, 
+    loginSystem, 
+    logoutSystem, 
+    currentUser 
+  } = useUserRole();
 
-  // Credentials Form States
+  const [selectedPortal, setSelectedPortal] = useState<'super-admin' | 'planner' | 'leader' | 'member' | 'production-board' | null>(null);
+
+  // Device Authentication Form States
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Operator Console Login States
   const [pin, setPin] = useState('');
   const [memberName, setMemberName] = useState('');
   const [showPinRefTable, setShowPinRefTable] = useState(false);
@@ -201,19 +215,50 @@ export function LoginPage() {
     }
   }, [selectedFactory]);
 
-  const handlePortalSelect = (portal: 'planner' | 'leader' | 'viewer' | 'member' | 'production-board') => {
+  const handleDeviceLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setIsLoggingIn(true);
+    try {
+      await loginSystem(email, password);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Incorrect credentials.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handlePortalSelect = (portal: 'super-admin' | 'planner' | 'leader' | 'member' | 'production-board') => {
     setErrorMsg('');
     setPin('');
     setMemberName('');
 
-    if (portal === 'viewer') {
-      // Viewer does not need a PIN, enter directly
-      setRole('viewer');
+    if (portal === 'super-admin') {
+      setPlannerAdminPin('5555');
+      setRole('super-admin');
+      return;
+    }
+
+    if (portal === 'planner') {
+      // Planner enters directly; pre-populate planner admin pin for client-to-API auth compatibility
+      setPlannerAdminPin('5555');
+      setRole('planner');
+      return;
+    }
+
+    if (portal === 'leader') {
+      // Leader enters directly; seed a default session based on the authenticated device user
+      const sessionPayload = {
+        id: currentUser?.email || 'device-leader',
+        name: currentUser?.name || 'Device Leader',
+        loginTimestamp: Date.now()
+      };
+      localStorage.setItem('sugity_active_leader_session', JSON.stringify(sessionPayload));
+      setRole('leader');
       return;
     }
 
     if (portal === 'production-board') {
-      // Production Board is an open display board, enter directly like Viewer
       setRole('production-board');
       return;
     }
@@ -221,32 +266,11 @@ export function LoginPage() {
     setSelectedPortal(portal);
   };
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
+  const handleOperatorLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
-    if (selectedPortal === 'planner') {
-      if (pin === '5555') {
-        // Keep the PIN as the authorization credential for planner-only
-        // leader management endpoints (validated server-side).
-        setPlannerAdminPin(pin);
-        setRole('planner');
-      } else {
-        setErrorMsg('Incorrect Planner PIN. Please use: 5555');
-      }
-    } else if (selectedPortal === 'leader') {
-      const leader = await verifyLeaderPin(pin);
-      if (leader) {
-        const sessionPayload = {
-          ...leader,
-          loginTimestamp: Date.now()
-        };
-        localStorage.setItem('sugity_active_leader_session', JSON.stringify(sessionPayload));
-        setRole('leader');
-      } else {
-        setErrorMsg('Incorrect Leader PIN.');
-      }
-    } else if (selectedPortal === 'member') {
+    if (selectedPortal === 'member') {
       if (!memberName.trim()) {
         setErrorMsg('Member Name is required.');
         return;
@@ -279,6 +303,161 @@ export function LoginPage() {
   const activeFactoryData = FACTORY_DATA.find(f => f.name === selectedFactory);
   const styles = THEME_STYLES[theme] || THEME_STYLES.sugity;
 
+  const userRole = currentUser?.role;
+  const portals = [
+    {
+      id: 'super-admin' as const,
+      title: 'Super Admin Portal',
+      desc: 'Master workspace with override privileges. Upload forecasts, edit sequencing, configure patterns, and access all settings.',
+      icon: UserCog,
+      glow: styles.glow2,
+      color: 'text-amber-600',
+      bg: 'bg-amber-550/10',
+      border: 'border-amber-500/20',
+      action: 'Access Super Admin',
+      visible: userRole === 'super-admin'
+    },
+    {
+      id: 'planner' as const,
+      title: 'Planner Portal',
+      desc: 'Forecast upload, capacity check, database adjustments, and master plan execution control.',
+      icon: UserCog,
+      glow: styles.glow1,
+      color: styles.accentText,
+      bg: styles.accentBg,
+      border: styles.accentBorder,
+      action: 'Access Portal',
+      visible: userRole === 'planner' || userRole === 'super-admin'
+    },
+    {
+      id: 'leader' as const,
+      title: 'Leader Portal',
+      desc: 'Shift scheduling, overtime setup, leveled sequencing adjustment, and shopfloor oversight.',
+      icon: Users,
+      glow: styles.glow2,
+      color: styles.accentText,
+      bg: styles.accentBg,
+      border: styles.accentBorder,
+      action: 'Access Portal',
+      visible: userRole === 'planner' || userRole === 'leader' || userRole === 'super-admin'
+    },
+    {
+      id: 'member' as const,
+      title: 'Member Operation',
+      desc: 'Dedicated screen locked to individual injection machines. Live execution, barcode label printing, and abnormality logs.',
+      icon: Factory,
+      glow: styles.glow1,
+      color: styles.accentText,
+      bg: styles.accentBg,
+      border: styles.accentBorder,
+      action: 'Access Console',
+      visible: userRole === 'planner' || userRole === 'leader' || userRole === 'member' || userRole === 'super-admin'
+    },
+    {
+      id: 'production-board' as const,
+      title: 'Production Dashboard',
+      desc: 'Fullscreen single-page monitor of every machine condition across SC1 & SC2 plants.',
+      icon: MonitorPlay,
+      glow: styles.glow1,
+      color: styles.accentText,
+      bg: styles.accentBg,
+      border: styles.accentBorder,
+      action: 'Enter Board',
+      visible: true
+    }
+  ];
+
+  const visiblePortals = portals.filter(p => p.visible);
+
+  // Render Case 1: Device is not authorized
+  if (!isAuthenticated) {
+    return (
+      <div className={`min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8 select-none relative overflow-y-auto transition-colors duration-500 ${styles.bg}`}>
+        {/* Decorative background glows */}
+        <div className={`absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] transition-colors duration-500 ${styles.glow1}`}></div>
+        <div className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] transition-colors duration-500 ${styles.glow2}`}></div>
+
+        {/* Brand Header */}
+        <div className="w-full sm:absolute sm:top-8 sm:left-8 flex items-center justify-center sm:justify-start gap-3 mb-6 sm:mb-0 z-20">
+          <div className="w-[88px] h-[58px] flex items-center justify-center transition-all shrink-0">
+            <img src="/logo.png" alt="SC Logo" className="max-h-full max-w-full object-contain" />
+          </div>
+          <div className="flex flex-col text-left min-w-0">
+            <span className={`text-sm sm:text-base font-black tracking-tight uppercase leading-none mb-0.5 transition-colors ${styles.textTitle} truncate`}>PT. SUGITY CREATIVES</span>
+            <span className={`text-[9px] sm:text-xs font-bold tracking-widest uppercase leading-none transition-colors duration-500 ${styles.accentText} truncate`}>Integrated Production Planning System</span>
+          </div>
+        </div>
+
+        {/* Device Authorization Form */}
+        <div className="w-full max-w-[420px] z-10 py-12">
+          <div className={`w-full ${styles.cardBg} ${styles.cardBorder} border backdrop-blur-xl rounded-2xl shadow-2xl p-8 flex flex-col space-y-6 relative overflow-hidden animate-in fade-in zoom-in-95 duration-250`}>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl"></div>
+
+            <div className="text-center space-y-2">
+              <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center mx-auto transition-colors ${styles.accentText} ${styles.accentBg} ${styles.accentBorder}`}>
+                <User className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <h2 className={`text-xl font-black uppercase tracking-wider transition-colors ${styles.textTitle}`}>
+                Device Authorization
+              </h2>
+              <p className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${styles.textDesc}`}>
+                Unlock this workstation by logging in
+              </p>
+            </div>
+
+            <form onSubmit={handleDeviceLoginSubmit} className="space-y-4 text-left">
+              <div className="space-y-1">
+                <label className={`text-[10px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Email Address</label>
+                <input
+                  type="email"
+                  placeholder="name@sugity.co.id"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.inputBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all shadow-inner`}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className={`text-[10px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Password</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.inputBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all shadow-inner`}
+                  required
+                />
+              </div>
+
+              {errorMsg && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 animate-pulse">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  {errorMsg}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className={`w-full py-3.5 text-white font-black uppercase text-sm rounded-xl shadow-lg transition-all active:scale-[0.98] tracking-widest flex items-center justify-center gap-2 cursor-pointer ${styles.buttonBg} disabled:opacity-50 disabled:cursor-not-allowed mt-2`}
+              >
+                {isLoggingIn ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <>
+                    <Unlock className="w-4 h-4" /> Authorize Device
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render Case 2: Device is authorized. Show Profile Portal Grid.
   return (
     <div className={`min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8 select-none relative overflow-y-auto transition-colors duration-500 ${styles.bg}`}>
 
@@ -286,16 +465,26 @@ export function LoginPage() {
       <div className={`absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] transition-colors duration-500 ${styles.glow1}`}></div>
       <div className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] transition-colors duration-500 ${styles.glow2}`}></div>
 
-      {/* Theme selector moved to the bottom for responsive design */}
-
-      {/* Main Header / Brand Info */}
-      <div className="w-full sm:absolute sm:top-8 sm:left-8 flex items-center justify-center sm:justify-start gap-3 mb-6 sm:mb-0 z-20">
-        <div className="w-[88px] h-[58px] flex items-center justify-center transition-all shrink-0">
-          <img src="/logo.png" alt="SC Logo" className="max-h-full max-w-full object-contain" />
+      {/* Main Header / Brand Info & Logout */}
+      <div className="w-full sm:absolute sm:top-8 sm:left-8 sm:right-8 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 sm:mb-0 z-20">
+        <div className="flex items-center gap-3">
+          <div className="w-[88px] h-[58px] flex items-center justify-center transition-all shrink-0">
+            <img src="/logo.png" alt="SC Logo" className="max-h-full max-w-full object-contain" />
+          </div>
+          <div className="flex flex-col text-left min-w-0">
+            <span className={`text-sm sm:text-base font-black tracking-tight uppercase leading-none mb-0.5 transition-colors ${styles.textTitle} truncate`}>PT. SUGITY CREATIVES</span>
+            <span className={`text-[9px] sm:text-xs font-bold tracking-widest uppercase leading-none transition-colors duration-500 ${styles.accentText} truncate`}>Integrated Production Planning System</span>
+          </div>
         </div>
-        <div className="flex flex-col text-left min-w-0">
-          <span className={`text-sm sm:text-base font-black tracking-tight uppercase leading-none mb-0.5 transition-colors ${styles.textTitle} truncate`}>PT. SUGITY CREATIVES</span>
-          <span className={`text-[9px] sm:text-xs font-bold tracking-widest uppercase leading-none transition-colors duration-500 ${styles.accentText} truncate`}>Integrated Production Planning System</span>
+
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Device Active: <b className="text-slate-600">{currentUser?.name}</b></span>
+          <button
+            onClick={logoutSystem}
+            className="px-4 py-2 border border-slate-300 hover:bg-slate-200/50 text-slate-700 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-[0.98] cursor-pointer"
+          >
+            Logout System
+          </button>
         </div>
       </div>
 
@@ -307,99 +496,34 @@ export function LoginPage() {
 
         {selectedPortal === null ? (
           /* Role Selection Cards */
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 w-full">
-            {/* Planner Card */}
-            <div
-              onClick={() => handlePortalSelect('planner')}
-              className={`${styles.cardBg} ${styles.cardBorder} border p-6 rounded-2xl flex flex-col justify-between h-[245px] transition-all duration-300 cursor-pointer group hover:-translate-y-1 text-left relative overflow-hidden ${styles.cardHover}`}
-            >
-              <div className={`absolute top-0 right-0 w-16 h-16 rounded-full blur-xl transition-all duration-500 ${styles.glow1} group-hover:scale-110`}></div>
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-500 group-hover:scale-110 ${styles.accentText} ${styles.accentBg} ${styles.accentBorder} ${styles.primaryGlow}`}>
-                <UserCog className="w-6 h-6 stroke-[2.5]" />
+          <div className={`grid grid-cols-1 gap-6 w-full max-w-4xl ${
+            visiblePortals.length === 1 ? 'max-w-sm' :
+            visiblePortals.length === 2 ? 'md:grid-cols-2 max-w-2xl' :
+            visiblePortals.length === 3 ? 'md:grid-cols-3 max-w-3xl' :
+            'md:grid-cols-2 lg:grid-cols-4'
+          }`}>
+            {visiblePortals.map((p) => (
+              <div
+                key={p.id}
+                onClick={() => handlePortalSelect(p.id)}
+                className={`${styles.cardBg} ${styles.cardBorder} border p-6 rounded-2xl flex flex-col justify-between h-[245px] transition-all duration-300 cursor-pointer group hover:-translate-y-1 text-left relative overflow-hidden ${styles.cardHover}`}
+              >
+                <div className={`absolute top-0 right-0 w-16 h-16 rounded-full blur-xl transition-all duration-500 ${p.glow} group-hover:scale-110`}></div>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-500 group-hover:scale-110 ${p.color} ${p.bg} ${p.border} ${styles.primaryGlow}`}>
+                  <p.icon className="w-6 h-6 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className={`text-base font-black uppercase tracking-wider mb-1 ${styles.textTitle}`}>{p.title}</h3>
+                  <p className={`text-xs font-medium leading-relaxed ${styles.textDesc}`}>{p.desc}</p>
+                </div>
+                <div className={`flex items-center text-xs font-black uppercase tracking-wider gap-1 pt-2 transition-colors duration-500 ${p.color}`}>
+                  {p.action} <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </div>
               </div>
-              <div>
-                <h3 className={`text-base font-black uppercase tracking-wider mb-1 ${styles.textTitle}`}>Planner Portal</h3>
-                <p className={`text-xs font-medium leading-relaxed ${styles.textDesc}`}>Forecast upload, capacity check, database adjustments, and master plan execution control.</p>
-              </div>
-              <div className={`flex items-center text-xs font-black uppercase tracking-wider gap-1 pt-2 transition-colors duration-500 ${styles.accentText}`}>
-                Access Portal <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </div>
-
-            {/* Leader Card */}
-            <div
-              onClick={() => handlePortalSelect('leader')}
-              className={`${styles.cardBg} ${styles.cardBorder} border p-6 rounded-2xl flex flex-col justify-between h-[245px] transition-all duration-300 cursor-pointer group hover:-translate-y-1 text-left relative overflow-hidden ${styles.cardHover}`}
-            >
-              <div className={`absolute top-0 right-0 w-16 h-16 rounded-full blur-xl transition-all duration-500 ${styles.glow2} group-hover:scale-110`}></div>
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-500 group-hover:scale-110 ${styles.accentText} ${styles.accentBg} ${styles.accentBorder} ${styles.primaryGlow}`}>
-                <Users className="w-6 h-6 stroke-[2.5]" />
-              </div>
-              <div>
-                <h3 className={`text-base font-black uppercase tracking-wider mb-1 ${styles.textTitle}`}>Leader Portal</h3>
-                <p className={`text-xs font-medium leading-relaxed ${styles.textDesc}`}>Shift scheduling, overtime setup, leveled sequencing adjustment, and shopfloor oversight.</p>
-              </div>
-              <div className={`flex items-center text-xs font-black uppercase tracking-wider gap-1 pt-2 transition-colors duration-500 ${styles.accentText}`}>
-                Access Portal <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </div>
-
-            {/* Member Card */}
-            <div
-              onClick={() => handlePortalSelect('member')}
-              className={`${styles.cardBg} ${styles.cardBorder} border p-6 rounded-2xl flex flex-col justify-between h-[245px] transition-all duration-300 cursor-pointer group hover:-translate-y-1 text-left relative overflow-hidden ${styles.cardHover}`}
-            >
-              <div className={`absolute top-0 right-0 w-16 h-16 rounded-full blur-xl transition-all duration-500 ${styles.glow1} group-hover:scale-110`}></div>
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-500 group-hover:scale-110 ${styles.accentText} ${styles.accentBg} ${styles.accentBorder} ${styles.primaryGlow}`}>
-                <Factory className="w-6 h-6 stroke-[2.5]" />
-              </div>
-              <div>
-                <h3 className={`text-base font-black uppercase tracking-wider mb-1 ${styles.textTitle}`}>Member Operation</h3>
-                <p className={`text-xs font-medium leading-relaxed ${styles.textDesc}`}>Dedicated screen locked to individual injection machines. Live execution, barcode label printing, and abnormality logs.</p>
-              </div>
-              <div className={`flex items-center text-xs font-black uppercase tracking-wider gap-1 pt-2 transition-colors duration-500 ${styles.accentText}`}>
-                Access Console <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </div>
-
-            {/* Viewer Card */}
-            <div
-              onClick={() => handlePortalSelect('viewer')}
-              className={`${styles.cardBg} ${styles.cardBorder} border p-6 rounded-2xl flex flex-col justify-between h-[245px] transition-all duration-300 cursor-pointer group hover:-translate-y-1 text-left relative overflow-hidden ${styles.cardHover}`}
-            >
-              <div className={`absolute top-0 right-0 w-16 h-16 rounded-full blur-xl transition-all duration-500 ${styles.glow2} group-hover:scale-110`}></div>
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-500 group-hover:scale-110 ${styles.accentText} ${styles.accentBg} ${styles.accentBorder} ${styles.primaryGlow}`}>
-                <Eye className="w-6 h-6 stroke-[2.5]" />
-              </div>
-              <div>
-                <h3 className={`text-base font-black uppercase tracking-wider mb-1 ${styles.textTitle}`}>Viewer Board</h3>
-                <p className={`text-xs font-medium leading-relaxed ${styles.textDesc}`}>Open access live monitoring boards for factory offices and status display monitors. No password needed.</p>
-              </div>
-              <div className={`flex items-center text-xs font-black uppercase tracking-wider gap-1 pt-2 transition-colors duration-500 ${styles.accentText}`}>
-                Enter Dashboard <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </div>
-
-            {/* Production Board Card */}
-            <div
-              onClick={() => handlePortalSelect('production-board')}
-              className={`${styles.cardBg} ${styles.cardBorder} border p-6 rounded-2xl flex flex-col justify-between h-[245px] transition-all duration-300 cursor-pointer group hover:-translate-y-1 text-left relative overflow-hidden ${styles.cardHover}`}
-            >
-              <div className={`absolute top-0 right-0 w-16 h-16 rounded-full blur-xl transition-all duration-500 ${styles.glow1} group-hover:scale-110`}></div>
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-500 group-hover:scale-110 ${styles.accentText} ${styles.accentBg} ${styles.accentBorder} ${styles.primaryGlow}`}>
-                <MonitorPlay className="w-6 h-6 stroke-[2.5]" />
-              </div>
-              <div>
-                <h3 className={`text-base font-black uppercase tracking-wider mb-1 ${styles.textTitle}`}>Production Dashboard</h3>
-                <p className={`text-xs font-medium leading-relaxed ${styles.textDesc}`}>Fullscreen single-page monitor of every machine condition across SC1 &amp; SC2 plants. No password needed.</p>
-              </div>
-              <div className={`flex items-center text-xs font-black uppercase tracking-wider gap-1 pt-2 transition-colors duration-500 ${styles.accentText}`}>
-                Enter Board <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </div>
+            ))}
           </div>
         ) : (
-          /* Form Entry based on selected role */
+          /* Form Entry (Only for Member Operator console) */
           <div className={`w-full max-w-[460px] ${styles.cardBg} ${styles.cardBorder} border backdrop-blur-xl rounded-2xl shadow-2xl p-8 flex flex-col space-y-6 relative overflow-hidden animate-in fade-in zoom-in-95 duration-250`}>
             <div className="absolute top-0 right-0 w-24 h-24 bg-white/5 rounded-full blur-2xl"></div>
 
@@ -408,61 +532,56 @@ export function LoginPage() {
                 <Lock className="w-6 h-6 stroke-[2.5]" />
               </div>
               <h2 className={`text-xl font-black uppercase tracking-wider transition-colors ${styles.textTitle}`}>
-                {selectedPortal === 'member' ? 'Member Machine Login' : `${selectedPortal} Authentication`}
+                Member Machine Login
               </h2>
               <p className={`text-xs font-bold uppercase tracking-wider transition-colors ${styles.textDesc}`}>
-                {selectedPortal === 'member' ? 'Select your machine and enter details to log in' : 'Enter PIN credentials to authorize'}
+                Select your machine and enter details to log in
               </p>
             </div>
 
-            <form onSubmit={handleLoginSubmit} className="space-y-4 text-left">
-              {/* Member Selectors */}
-              {selectedPortal === 'member' && (
-                <>
-                  <div className="space-y-1">
-                    <label className={`text-[11px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Select Factory</label>
-                    <select
-                      value={selectedFactory}
-                      onChange={(e) => setSelectedFactory(e.target.value)}
-                      className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.badgeBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all appearance-none cursor-pointer`}
-                    >
-                      {FACTORY_DATA.map(f => (
-                        <option key={f.name} value={f.name} className={theme === 'light' ? 'bg-white text-slate-800' : 'bg-slate-950 text-white'}>{f.label}</option>
-                      ))}
-                    </select>
-                  </div>
+            <form onSubmit={handleOperatorLoginSubmit} className="space-y-4 text-left">
+              <div className="space-y-1">
+                <label className={`text-[11px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Select Factory</label>
+                <select
+                  value={selectedFactory}
+                  onChange={(e) => setSelectedFactory(e.target.value)}
+                  className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.badgeBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all appearance-none cursor-pointer`}
+                >
+                  {FACTORY_DATA.map(f => (
+                    <option key={f.name} value={f.name} className={theme === 'light' ? 'bg-white text-slate-800' : 'bg-slate-950 text-white'}>{f.label}</option>
+                  ))}
+                </select>
+              </div>
 
-                  <div className="space-y-1">
-                    <label className={`text-[11px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Select Machine</label>
-                    <select
-                      value={selectedMachineId}
-                      onChange={(e) => setSelectedMachineId(e.target.value)}
-                      className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.badgeBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all appearance-none cursor-pointer`}
-                    >
-                      {activeFactoryData?.machines.map(m => (
-                        <option key={m.id} value={m.id} className={theme === 'light' ? 'bg-white text-slate-800' : 'bg-slate-950 text-white'}>Machine {m.id} ({m.tonnage})</option>
-                      ))}
-                    </select>
-                  </div>
+              <div className="space-y-1">
+                <label className={`text-[11px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Select Machine</label>
+                <select
+                  value={selectedMachineId}
+                  onChange={(e) => setSelectedMachineId(e.target.value)}
+                  className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.badgeBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all appearance-none cursor-pointer`}
+                >
+                  {activeFactoryData?.machines.map(m => (
+                    <option key={m.id} value={m.id} className={theme === 'light' ? 'bg-white text-slate-800' : 'bg-slate-950 text-white'}>Machine {m.id} ({m.tonnage})</option>
+                  ))}
+                </select>
+              </div>
 
-                  <div className="space-y-1">
-                    <label className={`text-[11px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Member Name</label>
-                    <input
-                      type="text"
-                      placeholder="Enter your name"
-                      value={memberName}
-                      onChange={(e) => setMemberName(e.target.value)}
-                      className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.inputBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all shadow-inner`}
-                      required
-                    />
-                  </div>
-                </>
-              )}
+              <div className="space-y-1">
+                <label className={`text-[11px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Member Name</label>
+                <input
+                  type="text"
+                  placeholder="Enter your name"
+                  value={memberName}
+                  onChange={(e) => setMemberName(e.target.value)}
+                  className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.inputBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all shadow-inner`}
+                  required
+                />
+              </div>
 
               {/* Password / PIN input */}
               <div className="space-y-1">
                 <label className={`text-[11px] font-black uppercase tracking-widest block ${styles.textDesc}`}>
-                  {selectedPortal === 'member' ? 'Member PIN' : 'Authorized PIN'}
+                  Member PIN
                 </label>
                 <input
                   type="password"
@@ -474,21 +593,13 @@ export function LoginPage() {
                   required
                 />
                 <span className={`text-[10px] font-bold block mt-1.5 text-center uppercase tracking-wider ${styles.textDesc}`}>
-                  {selectedPortal === 'member' ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowPinRefTable(true)}
-                      className="text-emerald-500 hover:text-emerald-600 font-extrabold underline cursor-pointer inline-flex items-center gap-1"
-                    >
-                      <FileText className="w-3.5 h-3.5" /> View PIN Reference Table
-                    </button>
-                  ) : (
-                    <>
-                      Default PIN Hint: <b className={`${styles.textSub}`}>
-                        {selectedPortal === 'planner' ? '5555' : '8811 (AP) / 8888'}
-                      </b>
-                    </>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowPinRefTable(true)}
+                    className="text-emerald-500 hover:text-emerald-600 font-extrabold underline cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> View PIN Reference Table
+                  </button>
                 </span>
               </div>
 

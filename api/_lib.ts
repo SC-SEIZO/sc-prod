@@ -77,3 +77,63 @@ export const migrateLegacyPins = async (): Promise<void> => {
     console.warn('[leaders] PIN migration error:', e?.message || e);
   }
 };
+
+// --- Custom JWT & Cookie Helpers (Pure JS/TS, No Dependencies) ---
+export const JWT_SECRET = process.env.JWT_SECRET || 'sugity-secret-key-12345!';
+
+function base64url(buf: Buffer): string {
+  return buf.toString('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
+function fromBase64url(str: string): Buffer {
+  let s = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return Buffer.from(s, 'base64');
+}
+
+export const signJwt = (payload: any, secret: string): string => {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const part1 = base64url(Buffer.from(JSON.stringify(header)));
+  const part2 = base64url(Buffer.from(JSON.stringify(payload)));
+  const signature = base64url(
+    crypto.createHmac('sha256', secret)
+      .update(part1 + '.' + part2)
+      .digest()
+  );
+  return `${part1}.${part2}.${signature}`;
+};
+
+export const verifyJwt = (token: string, secret: string): any | null => {
+  if (!token) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [part1, part2, part3] = parts;
+  const expectedSignature = base64url(
+    crypto.createHmac('sha256', secret)
+      .update(part1 + '.' + part2)
+      .digest()
+  );
+  if (part3 !== expectedSignature) return null;
+  try {
+    return JSON.parse(fromBase64url(part2).toString('utf8'));
+  } catch {
+    return null;
+  }
+};
+
+export const parseCookies = (cookieHeader: string | undefined): Record<string, string> => {
+  const list: Record<string, string> = {};
+  if (!cookieHeader) return list;
+  cookieHeader.split(';').forEach((cookie) => {
+    const parts = cookie.split('=');
+    const name = parts.shift()?.trim();
+    if (name) {
+      list[name] = decodeURIComponent(parts.join('='));
+    }
+  });
+  return list;
+};
+

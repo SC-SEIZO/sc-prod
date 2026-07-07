@@ -5,6 +5,8 @@ import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
+import { JWT_SECRET, signJwt, verifyJwt, parseCookies } from './api/_lib';
+
 
 // ---------------------------------------------------------------------------
 // Leader PIN security
@@ -170,6 +172,234 @@ async function startServer() {
     const match = (data || []).find(l => verifyPinHash(pin, l.pin_hash) || (l.pin && l.pin === pin));
     if (!match) return res.status(401).json({ error: 'Invalid Leader PIN.' });
     res.json({ leader: { id: match.id, name: match.name } });
+  });
+
+  // ------------------------------------------------------------------
+  // Device Auth APIs (JWT in Cookies)
+  // ------------------------------------------------------------------
+
+  // POST /api/auth/login: verify email/password and set HttpOnly cookie
+  app.post('/api/auth/login', async (req, res) => {
+    if (!requireDb(res)) return;
+    try {
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const password = String(req.body?.password || '').trim();
+
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required.' });
+      }
+
+      const { data: user, error } = await supabaseAdmin!
+        .from('users')
+        .select('id, email, role, name, password_hash')
+        .eq('email', email)
+        .maybeSingle();
+
+      if (error) return res.status(500).json({ error: error.message });
+      if (!user || !user.password_hash) {
+        return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      const isMatched = verifyPinHash(password, user.password_hash);
+      if (!isMatched) {
+        return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      const payload = {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        timestamp: Date.now()
+      };
+      const token = signJwt(payload, JWT_SECRET);
+
+      const isProd = process.env.NODE_ENV === 'production';
+      const cookieAttrs = [
+        `sugity_session=${token}`,
+        'HttpOnly',
+        'Path=/',
+        'Max-Age=2592000', // 30 days
+        'SameSite=Lax',
+        isProd ? 'Secure' : ''
+      ].filter(Boolean).join('; ');
+
+      res.setHeader('Set-Cookie', cookieAttrs);
+      res.json({
+        success: true,
+        user: {
+          email: user.email,
+          role: user.role,
+          name: user.name
+        }
+      });
+    } catch (err: any) {
+      console.error('[/api/auth/login] Error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/auth/me: get current authenticated session
+  app.get('/api/auth/me', (req, res) => {
+    try {
+      const cookies = parseCookies(req.headers.cookie);
+      const token = cookies['sugity_session'];
+
+      if (!token) {
+        return res.json({ authenticated: false });
+      }
+
+      const decoded = verifyJwt(token, JWT_SECRET);
+      if (!decoded) {
+        return res.json({ authenticated: false });
+      }
+
+      res.json({
+        authenticated: true,
+        user: {
+          email: decoded.email,
+          role: decoded.role,
+          name: decoded.name
+        }
+      });
+    } catch (err: any) {
+      console.error('[/api/auth/me] Error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/auth/logout: clear session cookie
+  app.post('/api/auth/logout', (req, res) => {
+    res.setHeader('Set-Cookie', 'sugity_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
+    res.json({ success: true });
+  });
+
+  // ------------------------------------------------------------------
+  // User Management APIs (Super Admin only)
+  // ------------------------------------------------------------------
+  app.all('/api/auth/users', async (req, res) => {
+    if (!requireDb(res)) return;
+
+    // 1. Authenticate and check if the user is a super-admin
+    const cookies = parseCookies(req.headers.cookie);
+    const token = cookies['sugity_session'];
+
+    if (!token) {
+      return res.status(401).json({ error: 'Authorization token is missing.' });
+    }
+
+    const decoded = verifyJwt(token, JWT_SECRET);
+    if (!decoded || decoded.role !== 'super-admin') {
+      return res.status(403).json({ error: 'Access denied. Super Admin privileges required.' });
+    }
+
+    const method = req.method;
+
+    try {
+      if (method === 'GET') {
+        const { data: users, error } = await supabaseAdmin!
+          .from('users')
+          .select('id, uid, email, role, name, photo_url, created_at')
+          .order('created_at', { ascending: false });
+
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ users: users || [] });
+      }
+
+      if (method === 'POST') {
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const role = String(req.body?.role || '').trim();
+        const name = String(req.body?.name || '').trim();
+        const password = String(req.body?.password || '').trim();
+
+        if (!email || !role || !name || !password) {
+          return res.status(400).json({ error: 'Email, role, name, and password are required.' });
+        }
+
+        const validRoles = ['super-admin', 'planner', 'leader', 'member', 'production-board'];
+        if (!validRoles.includes(role)) {
+          return res.status(400).json({ error: 'Invalid user role specified.' });
+        }
+
+        const { data, error } = await supabaseAdmin!
+          .from('users')
+          .insert({
+            uid: `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            email,
+            role,
+            name,
+            password_hash: hashPin(password)
+          })
+          .select('id, email, role, name, created_at')
+          .single();
+
+        if (error) {
+          if (error.code === '23505') {
+            return res.status(400).json({ error: 'Email address already registered.' });
+          }
+          return res.status(500).json({ error: error.message });
+        }
+
+        return res.status(201).json({ success: true, user: data });
+      }
+
+      if (method === 'PUT') {
+        const id = String(req.body?.id || '').trim();
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const role = String(req.body?.role || '').trim();
+        const name = String(req.body?.name || '').trim();
+        const password = String(req.body?.password || '').trim();
+
+        if (!id || !email || !role || !name) {
+          return res.status(400).json({ error: 'ID, email, role, and name are required.' });
+        }
+
+        const validRoles = ['super-admin', 'planner', 'leader', 'member', 'production-board'];
+        if (!validRoles.includes(role)) {
+          return res.status(400).json({ error: 'Invalid user role specified.' });
+        }
+
+        const updatePayload: any = { email, role, name };
+        if (password) {
+          updatePayload.password_hash = hashPin(password);
+        }
+
+        const { data, error } = await supabaseAdmin!
+          .from('users')
+          .update(updatePayload)
+          .eq('id', id)
+          .select('id, email, role, name, created_at')
+          .single();
+
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ success: true, user: data });
+      }
+
+      if (method === 'DELETE') {
+        const id = String(req.body?.id || req.query?.id || '').trim();
+
+        if (!id) {
+          return res.status(400).json({ error: 'User ID is required for deletion.' });
+        }
+
+        if (id === decoded.id) {
+          return res.status(400).json({ error: 'You cannot delete your own Super Admin account.' });
+        }
+
+        const { error } = await supabaseAdmin!
+          .from('users')
+          .delete()
+          .eq('id', id);
+
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json({ success: true });
+      }
+
+      res.status(405).json({ error: `Method ${method} not allowed` });
+    } catch (err: any) {
+      console.error('[User Management API local] Error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   });
 
   // Planner only: register a new leader (stores hash + AES-256-GCM ciphertext).

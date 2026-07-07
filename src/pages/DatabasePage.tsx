@@ -39,7 +39,29 @@ export function DatabasePage() {
   const prodContext = useContext(ProductionContext);
   
   // Top level page tab control: switches between Master Parts database, Data Converter, and Leader Registry
-  const [pageTab, setPageTab] = useState<'parts' | 'converter' | 'leaders' | 'reports'>('parts');
+  const [pageTab, setPageTab] = useState<'parts' | 'converter' | 'leaders' | 'reports' | 'users'>(
+    role === 'super-admin' ? 'users' : 'parts'
+  );
+
+  // User Management State (Super Admin Only)
+  const [systemUsers, setSystemUsers] = useState<any[]>([]);
+  const [isUsersLoading, setIsUsersLoading] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+  
+  // Add User Form States
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'super-admin' | 'planner' | 'leader' | 'member' | 'production-board'>('planner');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  
+  // Edit User State
+  const [selectedUserForEdit, setSelectedUserForEdit] = useState<any | null>(null);
+  const [editUserForm, setEditUserForm] = useState({
+    email: '',
+    name: '',
+    role: 'planner' as 'super-admin' | 'planner' | 'leader' | 'member' | 'production-board',
+    password: ''
+  });
 
   const [leaderName, setLeaderName] = useState('');
   const [leaderPin, setLeaderPin] = useState('');
@@ -71,6 +93,119 @@ export function DatabasePage() {
     fetchPins();
     return () => { cancelled = true; };
   }, [pageTab, role, leaders]);
+
+  const fetchUsers = async () => {
+    setIsUsersLoading(true);
+    try {
+      const res = await fetch('/api/auth/users');
+      if (res.ok) {
+        const body = await res.json();
+        setSystemUsers(body.users || []);
+      } else {
+        const err = await res.json();
+        triggerNotification(err.error || 'Failed to fetch users.', 'error');
+      }
+    } catch (e) {
+      triggerNotification('Failed to reach user management service.', 'error');
+    } finally {
+      setIsUsersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (pageTab === 'users' && role === 'super-admin') {
+      fetchUsers();
+    }
+  }, [pageTab, role]);
+
+  useEffect(() => {
+    if (role === 'super-admin') {
+      setPageTab('users');
+    }
+  }, [role]);
+
+  const handleAddUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserEmail.trim() || !newUserName.trim() || !newUserPassword.trim()) {
+      triggerNotification('Please fill in all fields.', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: newUserEmail.trim(),
+          name: newUserName.trim(),
+          role: newUserRole,
+          password: newUserPassword.trim()
+        })
+      });
+      if (res.ok) {
+        triggerNotification(`User ${newUserName} registered successfully!`, 'success');
+        setNewUserEmail('');
+        setNewUserName('');
+        setNewUserPassword('');
+        setNewUserRole('planner');
+        fetchUsers();
+      } else {
+        const err = await res.json();
+        triggerNotification(err.error || 'Failed to create user.', 'error');
+      }
+    } catch (err) {
+      triggerNotification('Failed to submit user registration.', 'error');
+    }
+  };
+
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUserForEdit) return;
+    if (!editUserForm.email.trim() || !editUserForm.name.trim()) {
+      triggerNotification('Please fill in all required fields.', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedUserForEdit.id,
+          email: editUserForm.email.trim(),
+          name: editUserForm.name.trim(),
+          role: editUserForm.role,
+          password: editUserForm.password.trim() || undefined
+        })
+      });
+      if (res.ok) {
+        triggerNotification(`User ${editUserForm.name} updated successfully!`, 'success');
+        setSelectedUserForEdit(null);
+        fetchUsers();
+      } else {
+        const err = await res.json();
+        triggerNotification(err.error || 'Failed to update user.', 'error');
+      }
+    } catch (err) {
+      triggerNotification('Failed to submit user updates.', 'error');
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    if (!confirm(`Are you sure you want to delete user ${userName}?`)) return;
+    try {
+      const res = await fetch(`/api/auth/users?id=${userId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        triggerNotification(`User ${userName} deleted successfully.`, 'success');
+        fetchUsers();
+      } else {
+        const err = await res.json();
+        triggerNotification(err.error || 'Failed to delete user.', 'error');
+      }
+    } catch (err) {
+      triggerNotification('Failed to request user deletion.', 'error');
+    }
+  };
 
   // Master Parts Form Tab control
   const [activeTab, setActiveTab] = useState<'csv' | 'manual'>('csv');
@@ -1394,6 +1529,16 @@ export function DatabasePage() {
         >
           Lot Sign-off Reports
         </button>
+        {role === 'super-admin' && (
+          <button 
+            onClick={() => setPageTab('users')}
+            className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-md transition-all duration-150 cursor-pointer ${
+              pageTab === 'users' ? 'bg-[#E76114] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-255/40'
+            }`}
+          >
+            User Management
+          </button>
+        )}
       </div>
 
       {pageTab === 'parts' && (
@@ -3121,6 +3266,299 @@ DROP POLICY IF EXISTS "Allow public write" ON public.leaders;
                 </div>
               </div>
             )}
+          </Card>
+        </div>
+      )}
+
+      {pageTab === 'users' && role === 'super-admin' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-800">System User Accounts</h3>
+              <p className="text-[10px] text-slate-400 mt-1">Manage credentials, login roles, and database privileges for planners, leaders, and production boards.</p>
+            </div>
+            
+            <button
+              onClick={fetchUsers}
+              disabled={isUsersLoading}
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-extrabold text-[10px] uppercase tracking-wider rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isUsersLoading ? 'animate-spin' : ''}`} /> Refresh Users
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Column: Register User Form */}
+            <div className="lg:col-span-4 text-left">
+              <Card className="p-5 border-slate-200 shadow-md">
+                <h3 className="font-extrabold text-slate-800 text-xs uppercase tracking-wider mb-4 border-b border-slate-100 pb-2 flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-[#037233]" /> Register New User
+                </h3>
+                <form onSubmit={handleAddUserSubmit} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Full Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. John Doe"
+                      value={newUserName}
+                      onChange={(e) => setNewUserName(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-bold"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Email Address</label>
+                    <input
+                      type="email"
+                      placeholder="e.g. johndoe@sugity.co.id"
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-mono"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Login Role</label>
+                    <select
+                      value={newUserRole}
+                      onChange={(e: any) => setNewUserRole(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-bold text-slate-800 cursor-pointer"
+                    >
+                      <option value="super-admin">Super Admin</option>
+                      <option value="planner">Planner</option>
+                      <option value="leader">Leader</option>
+                      <option value="member">Member Operator</option>
+                      <option value="production-board">Production Dashboard</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Password</label>
+                    <input
+                      type="password"
+                      placeholder="••••••••"
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-mono"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 bg-[#037233] hover:bg-[#025c27] text-white font-extrabold text-[10px] uppercase tracking-widest rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/10 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Register User
+                  </button>
+                </form>
+              </Card>
+            </div>
+
+            {/* Right Column: User list Table */}
+            <div className="lg:col-span-8">
+              <Card className="border-slate-200 shadow-md">
+                <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <h3 className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">Registered Accounts ({systemUsers.length})</h3>
+                  <div className="relative w-full sm:w-64">
+                    <input
+                      type="text"
+                      placeholder="Search users..."
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-all text-slate-800 font-medium"
+                    />
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+                <div className="overflow-x-auto min-h-[300px]">
+                  {isUsersLoading ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                      <RefreshCw className="w-8 h-8 animate-spin text-[#E76114] mb-2" />
+                      <span className="text-[10px] font-extrabold uppercase tracking-widest">Loading Accounts...</span>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-slate-500 font-extrabold uppercase tracking-wider bg-slate-50/50">
+                          <th className="px-5 py-3">User Details</th>
+                          <th className="px-4 py-3">Access Role</th>
+                          <th className="px-4 py-3 font-mono">UID / Key</th>
+                          <th className="px-5 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
+                        {systemUsers
+                          .filter(u => {
+                            const q = userSearch.toLowerCase().trim();
+                            if (!q) return true;
+                            return (
+                              (u.name || '').toLowerCase().includes(q) ||
+                              (u.email || '').toLowerCase().includes(q) ||
+                              (u.role || '').toLowerCase().includes(q)
+                            );
+                          })
+                          .map(u => (
+                            <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-5 py-3.5 text-left">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="font-extrabold text-slate-800">{u.name || 'Unnamed User'}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono font-medium">{u.email}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <span className={`px-2 py-0.5 rounded text-[9px] uppercase font-black tracking-wider border ${
+                                  u.role === 'super-admin'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : u.role === 'planner'
+                                      ? 'bg-emerald-50 text-[#037233] border-emerald-200'
+                                      : u.role === 'leader'
+                                        ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                        : u.role === 'member'
+                                          ? 'bg-slate-100 text-slate-700 border-slate-200'
+                                          : 'bg-purple-50 text-purple-700 border-purple-200'
+                                }`}>
+                                  {u.role}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400 font-medium">
+                                {u.uid}
+                              </td>
+                              <td className="px-5 py-3.5 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedUserForEdit(u);
+                                      setEditUserForm({
+                                        email: u.email,
+                                        name: u.name || '',
+                                        role: u.role,
+                                        password: ''
+                                      });
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer transition-colors"
+                                    title="Edit Account Details"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteUser(u.id, u.name || u.email)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
+                                    title="Delete Account"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        {systemUsers.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="px-5 py-8 text-center text-slate-400 font-medium italic">
+                              No user accounts found.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </Card>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT USER MODAL */}
+      {selectedUserForEdit && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <Card className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden flex flex-col my-8 animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-100 bg-[#E76114] text-white flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2.5">
+                <Edit2 className="w-4.5 h-4.5" />
+                <div>
+                  <h3 className="font-bold text-sm tracking-wide">Edit System User</h3>
+                  <p className="text-[9px] text-white/80 font-bold uppercase tracking-wider mt-0.5 font-mono">
+                    {selectedUserForEdit.email}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSelectedUserForEdit(null)}
+                className="p-1 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditUserSubmit} className="p-6 space-y-4 text-left">
+              <div className="space-y-1">
+                <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editUserForm.name}
+                  onChange={(e) => setEditUserForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-bold"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Email Address *</label>
+                <input
+                  type="email"
+                  required
+                  value={editUserForm.email}
+                  onChange={(e) => setEditUserForm(prev => ({ ...prev, email: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Login Role *</label>
+                <select
+                  value={editUserForm.role}
+                  onChange={(e: any) => setEditUserForm(prev => ({ ...prev, role: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-bold text-slate-800 cursor-pointer"
+                >
+                  <option value="super-admin">Super Admin</option>
+                  <option value="planner">Planner</option>
+                  <option value="leader">Leader</option>
+                  <option value="member">Member Operator</option>
+                  <option value="production-board">Production Dashboard</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500 flex flex-col">
+                  <span>Reset Password</span>
+                  <span className="text-[8px] text-slate-400 lowercase font-medium tracking-normal mt-0.5">(leave blank to keep current password)</span>
+                </label>
+                <input
+                  type="password"
+                  placeholder="New password (optional)"
+                  value={editUserForm.password}
+                  onChange={(e) => setEditUserForm(prev => ({ ...prev, password: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-mono"
+                />
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-3 justify-end pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSelectedUserForEdit(null)}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 font-extrabold text-[10px] uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-[#E76114] hover:bg-[#c95411] text-white font-extrabold text-[10px] uppercase tracking-wider rounded-lg transition-colors flex items-center gap-1.5 shadow-md shadow-orange-950/15 cursor-pointer"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Save Changes
+                </button>
+              </div>
+            </form>
           </Card>
         </div>
       )}

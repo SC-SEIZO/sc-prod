@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-export type UserRole = 'planner' | 'member' | 'leader' | 'viewer' | 'production-board' | 'guest';
+export type UserRole = 'super-admin' | 'planner' | 'member' | 'leader' | 'viewer' | 'production-board' | 'guest';
 export type AppTheme = 'sugity' | 'carbon' | 'ocean' | 'sakura' | 'light';
 
 export interface Leader {
@@ -33,34 +33,87 @@ interface UserContextType {
   deleteLeader: (id: string) => Promise<void>;
   verifyLeaderPin: (pin: string) => Promise<Leader | null>;
   isLeaderDbConnected: boolean;
+  isAuthenticated: boolean;
+  currentUser: { email: string; role: string; name: string } | null;
+  isLoadingAuth: boolean;
+  loginSystem: (email: string, password: string) => Promise<void>;
+  logoutSystem: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   // Persistence for session role
-  const [role, setRoleState] = useState<UserRole>(() => {
-    let saved = localStorage.getItem('sugity_active_role');
-    if (saved === 'operator') {
-      saved = 'member';
-      localStorage.setItem('sugity_active_role', 'member');
-    }
-    if (saved === 'sachou') {
-      // Legacy name for the fullscreen board role
-      saved = 'production-board';
-      localStorage.setItem('sugity_active_role', 'production-board');
-    }
-    if (saved === 'planner' || saved === 'member' || saved === 'leader' || saved === 'viewer' || saved === 'production-board' || saved === 'guest') {
-      return saved as UserRole;
-    }
-    return 'guest'; // Default to guest (Front Login Page)
-  });
+  const [role, setRoleState] = useState<UserRole>('guest');
+
+  // Auth states
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<{ email: string; role: string; name: string } | null>(null);
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
 
   // Persistence for app theme
   const [theme, setThemeState] = useState<AppTheme>('light');
 
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [isLeaderDbConnected, setIsLeaderDbConnected] = useState<boolean>(false);
+
+  const checkAuth = async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated) {
+          setIsAuthenticated(true);
+          setCurrentUser(data.user);
+          const savedRole = localStorage.getItem('sugity_active_role') as UserRole;
+          if (savedRole && savedRole !== 'guest') {
+            setRoleState(savedRole);
+          } else {
+            setRoleState('guest');
+          }
+        } else {
+          setIsAuthenticated(false);
+          setCurrentUser(null);
+          setRoleState('guest');
+        }
+      }
+    } catch (e) {
+      console.error('Auth check failed:', e);
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+      setRoleState('guest');
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const loginSystem = async (email: string, password: string) => {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Login failed.');
+    }
+    const data = await res.json();
+    setIsAuthenticated(true);
+    setCurrentUser(data.user);
+    setRoleState('guest');
+    localStorage.setItem('sugity_active_role', 'guest');
+  };
+
+  const logoutSystem = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {}
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setRoleState('guest');
+    localStorage.setItem('sugity_active_role', 'guest');
+  };
+
 
   // Leaders are managed exclusively through the app server API so PINs are
   // never exposed to the browser. Only names are ever listed client-side.
@@ -80,6 +133,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     // Clean up the legacy plaintext PIN cache from older app versions
     localStorage.removeItem('sugity_leaders');
 
+    checkAuth();
     refreshLeaders();
 
     // Re-sync leader names every 30 seconds to stay fresh across devices
@@ -222,7 +276,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
       addLeader,
       deleteLeader,
       verifyLeaderPin,
-      isLeaderDbConnected
+      isLeaderDbConnected,
+      isAuthenticated,
+      currentUser,
+      isLoadingAuth,
+      loginSystem,
+      logoutSystem
     }}>
       {children}
     </UserContext.Provider>
@@ -236,8 +295,8 @@ export function useUserRole() {
   }
   return {
     ...context,
-    canEditMaster: context.role === 'planner',
-    canEditPattern: context.role === 'planner' || context.role === 'leader',
-    canExecute: context.role === 'member' || context.role === 'leader' || context.role === 'planner',
+    canEditMaster: context.role === 'planner' || context.role === 'super-admin',
+    canEditPattern: context.role === 'planner' || context.role === 'leader' || context.role === 'super-admin',
+    canExecute: context.role === 'member' || context.role === 'leader' || context.role === 'planner' || context.role === 'super-admin',
   };
 }

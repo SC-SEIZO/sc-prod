@@ -130,29 +130,15 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-function AppContent() {
-  const { dbStatus } = useDbConnection();
-  const [currentView, setCurrentView] = useState('dashboard');
-  const { role } = useUserRole();
+interface AuthenticatedAppProps {
+  role: string;
+  dbStatus: string;
+  currentView: string;
+  setCurrentView: (view: string) => void;
+}
 
-  // Role security guard: if role is changed away from planner while in Database manager, redirect immediately
-  useEffect(() => {
-    if (currentView === 'database' && role !== 'planner') {
-      setCurrentView('dashboard');
-    }
-  }, [role, currentView]);
-
-  // Redirect to Front Login Page if no role selected (guest)
-  if (role === 'guest') {
-    return (
-      <>
-        <OfflineBanner />
-        <LoginPage />
-      </>
-    );
-  }
-
-  // Redirect to Member Portal if role is member (placed after all hook calls to satisfy rules of hooks)
+function AuthenticatedApp({ role, dbStatus, currentView, setCurrentView }: AuthenticatedAppProps) {
+  // Redirect to Member Portal if role is member
   if (role === 'member') {
     return <MemberPortal />;
   }
@@ -178,11 +164,11 @@ function AppContent() {
       case 'manpower':
         return <ManpowerPage />;
       case 'materials':
-         return <MaterialsPage />;
+        return <MaterialsPage />;
       case 'delivery':
-         return <DeliveryPage />;
+        return <DeliveryPage />;
       case 'database':
-         return <DatabasePage />;
+        return <DatabasePage />;
       default:
         return <DashboardPage />;
     }
@@ -200,20 +186,74 @@ function AppContent() {
   );
 }
 
+function AppContent() {
+  const { dbStatus } = useDbConnection();
+  const [currentView, setCurrentView] = useState('dashboard');
+  const { role, isLoadingAuth, isAuthenticated } = useUserRole();
+
+  // Role security guard: if role is changed away from planner/super-admin while in Database manager, redirect immediately
+  useEffect(() => {
+    if (currentView === 'database' && role !== 'planner' && role !== 'super-admin') {
+      setCurrentView('dashboard');
+    }
+  }, [role, currentView]);
+
+  // Redirect Super Admin directly to Database Manager on entry
+  useEffect(() => {
+    if (role === 'super-admin') {
+      setCurrentView('database');
+    }
+  }, [role]);
+
+  if (isLoadingAuth) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-50 text-slate-800 font-sans select-none">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-4 border-[#008d51] border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loading Workspace...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect to Front Login Page if no role selected (guest) or not authenticated
+  if (!isAuthenticated || role === 'guest') {
+    return (
+      <>
+        <OfflineBanner />
+        <LoginPage />
+      </>
+    );
+  }
+
+  // Mount database data providers conditionally ONLY after the device has authenticated
+  return (
+    <PartsProvider>
+      <ProductionProvider>
+        <OrdersProvider>
+          <AuthenticatedApp 
+            role={role} 
+            dbStatus={dbStatus} 
+            currentView={currentView} 
+            setCurrentView={setCurrentView} 
+          />
+        </OrdersProvider>
+      </ProductionProvider>
+    </PartsProvider>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
       <DatabaseConnectionProvider>
         <UserProvider>
-          <PartsProvider>
-            <ProductionProvider>
-              <OrdersProvider>
-                <AppContent />
-              </OrdersProvider>
-            </ProductionProvider>
-          </PartsProvider>
+          <AppContent />
         </UserProvider>
       </DatabaseConnectionProvider>
     </ErrorBoundary>
   );
 }
+
+
+

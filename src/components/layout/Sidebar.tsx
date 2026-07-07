@@ -40,7 +40,7 @@ export function Sidebar({ currentView, onChangeView, isMobileOpen, onClose }: Si
   const { dbStatus, recheckConnection } = useDbConnection();
 
   const allNavItems = [...navItems];
-  if (role === 'planner') {
+  if (role === 'planner' || role === 'super-admin') {
     allNavItems.push({ id: 'database', label: 'Database Manager', icon: Database });
   }
 
@@ -110,7 +110,8 @@ export function Sidebar({ currentView, onChangeView, isMobileOpen, onClose }: Si
       <div className="p-5 border-t border-white/10 bg-black/5 backdrop-blur-sm">
         <div className="flex items-center space-x-3 mb-3">
           <div className="w-9 h-9 rounded-full bg-white shadow-sm flex items-center justify-center font-bold text-xs text-[#E76114]">
-            {role === 'planner' ? 'PL' : 
+            {role === 'super-admin' ? 'SA' :
+             role === 'planner' ? 'PL' : 
              role === 'leader' ? 'LD' : 
              role === 'member' ? 'MB' : 'VW'}
           </div>
