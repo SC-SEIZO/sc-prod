@@ -159,14 +159,14 @@ const THEME_STYLES: Record<AppTheme, {
 };
 
 export function LoginPage() {
-  const { 
-    setRole, 
-    theme, 
-    setTheme, 
-    isAuthenticated, 
-    loginSystem, 
-    logoutSystem, 
-    currentUser 
+  const {
+    setRole,
+    theme,
+    setTheme,
+    isAuthenticated,
+    loginSystem,
+    logoutSystem,
+    currentUser
   } = useUserRole();
 
   const [selectedPortal, setSelectedPortal] = useState<'super-admin' | 'planner' | 'leader' | 'member' | 'production-board' | null>(null);
@@ -262,7 +262,7 @@ export function LoginPage() {
         setCountdown(0);
       }
     };
-    
+
     updateCountdown();
     return () => clearTimeout(timer);
   }, [deviceLockoutTime, memberLockoutTime]);
@@ -270,13 +270,13 @@ export function LoginPage() {
   const handleDeviceLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-    
+
     if (deviceLockoutTime && Date.now() < deviceLockoutTime) {
       const rem = Math.ceil((deviceLockoutTime - Date.now()) / 1000);
       setErrorMsg(`Too many failed attempts. Locked out. Try again in ${rem}s.`);
       return;
     }
-    
+
     if (username.trim().length < 3) {
       setErrorMsg('Username must be at least 3 characters long.');
       setIsLoggingIn(false);
@@ -378,7 +378,7 @@ export function LoginPage() {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           const errMsg = body.error || 'PIN verification failed.';
-          
+
           if (errMsg.includes('Locked out')) {
             setMemberLockoutTime(Date.now() + 60000);
             throw new Error(errMsg);
@@ -458,7 +458,7 @@ export function LoginPage() {
       bg: styles.accentBg,
       border: styles.accentBorder,
       action: 'Access Portal',
-      visible: userRole === 'leader' || userRole === 'super-admin'
+      visible: userRole === 'planner' || userRole === 'leader' || userRole === 'super-admin'
     },
     {
       id: 'member' as const,
@@ -470,7 +470,7 @@ export function LoginPage() {
       bg: styles.accentBg,
       border: styles.accentBorder,
       action: 'Access Console',
-      visible: userRole === 'member' || userRole === 'super-admin'
+      visible: userRole === 'planner' || userRole === 'leader' || userRole === 'member' || userRole === 'super-admin'
     },
     {
       id: 'production-board' as const,
@@ -617,12 +617,11 @@ export function LoginPage() {
 
         {selectedPortal === null ? (
           /* Role Selection Cards */
-          <div className={`grid grid-cols-1 gap-6 w-full max-w-4xl ${
-            visiblePortals.length === 1 ? 'max-w-sm' :
-            visiblePortals.length === 2 ? 'md:grid-cols-2 max-w-2xl' :
-            visiblePortals.length === 3 ? 'md:grid-cols-3 max-w-3xl' :
-            'md:grid-cols-2 lg:grid-cols-4'
-          }`}>
+          <div className={`grid grid-cols-1 gap-6 w-full max-w-4xl ${visiblePortals.length === 1 ? 'max-w-sm' :
+              visiblePortals.length === 2 ? 'md:grid-cols-2 max-w-2xl' :
+                visiblePortals.length === 3 ? 'md:grid-cols-3 max-w-3xl' :
+                  'md:grid-cols-2 lg:grid-cols-4'
+            }`}>
             {visiblePortals.map((p) => (
               <div
                 key={p.id}

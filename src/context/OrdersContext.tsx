@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useParts } from './PartsContext';
 import { ProductionContext, Job, resolveMachineKey, getTodayDateString, getHeijunkaJobsForMachine } from './ProductionContext';
-import { supabase } from '../lib/supabase';
 
 export interface OrderConversion {
   id: string;
@@ -146,25 +145,9 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
   const [commands, setCommands] = useState<ProductionCommand[]>([]);
 
-  // 1. Fetch conversions from Supabase on start
+  // 1. Fetch conversions on start (local memory only)
   const fetchConversions = async () => {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.from('order_conversions').select('*');
-        if (!error && data) {
-          const mapped = data.map((c: any): OrderConversion => ({
-            id: c.id,
-            custPartNumber: c.cust_part_number || c.custPartNumber,
-            custSebango: c.cust_sebango || c.custSebango || 'CUST-SEB',
-            prodSebango: c.prod_sebango || c.prodSebango,
-            partCategory: (c.part_category || c.partCategory || 'big') as 'big' | 'small'
-          }));
-          setConversions(mapped);
-        }
-      } catch (err) {
-        console.error('Error fetching conversions from Supabase:', err);
-      }
-    }
+    // Under local SQLite/PostgreSQL setup, order conversions are not implemented yet
   };
 
   useEffect(() => {
@@ -340,66 +323,15 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
       id: tempId
     };
     
-    // 1. Update local state instantly
     setConversions(prev => [newConv, ...prev]);
-
-    // 2. Sync with Supabase in the background
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.from('order_conversions').insert({
-          cust_part_number: conv.custPartNumber.trim(),
-          cust_sebango: conv.custSebango.trim() || 'CUST-SEB',
-          prod_sebango: conv.prodSebango.trim(),
-          part_category: conv.partCategory
-        }).select();
-        
-        if (!error && data && data.length > 0) {
-          // Replace temporary ID with true Supabase ID
-          setConversions(prev => prev.map(c => c.id === tempId ? { ...c, id: data[0].id } : c));
-        }
-      } catch (err) {
-        console.error('Error syncing addConversion to Supabase:', err);
-      }
-    }
   };
 
   const deleteConversion = async (id: string) => {
-    // 1. Update local state instantly
     setConversions(prev => prev.filter(c => c.id !== id));
-
-    // 2. Sync with Supabase in the background
-    if (supabase) {
-      try {
-        await supabase.from('order_conversions').delete().eq('id', id);
-      } catch (err) {
-        console.error('Error syncing deleteConversion to Supabase:', err);
-      }
-    }
   };
 
   const updateConversion = async (id: string, updatedFields: Omit<OrderConversion, 'id'>) => {
-    // 1. Update local state instantly
     setConversions(prev => prev.map(c => c.id === id ? { ...c, ...updatedFields } : c));
-
-    // 2. Sync with Supabase in the background
-    if (supabase) {
-      try {
-        const { error } = await supabase
-          .from('order_conversions')
-          .update({
-            cust_part_number: updatedFields.custPartNumber.trim(),
-            cust_sebango: updatedFields.custSebango.trim() || 'CUST-SEB',
-            prod_sebango: updatedFields.prodSebango.trim(),
-            part_category: updatedFields.partCategory
-          })
-          .eq('id', id);
-        if (error) {
-          console.error('Supabase updateConversion error:', error);
-        }
-      } catch (err) {
-        console.error('Supabase updateConversion exception:', err);
-      }
-    }
   };
 
   const uploadDailyOrders = (channel: 'TMMIN' | 'ADM' | 'TBINA' | 'Others', newOrders: Omit<DailyOrder, 'id' | 'channel'>[]) => {
@@ -586,13 +518,6 @@ export function OrdersProvider({ children }: { children: React.ReactNode }) {
 
   const clearConversions = async () => {
     setConversions([]);
-    if (supabase) {
-      try {
-        await supabase.from('order_conversions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      } catch (err) {
-        console.error('Error syncing clearConversions to Supabase:', err);
-      }
-    }
   };
 
   return (

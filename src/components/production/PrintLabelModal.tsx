@@ -3,7 +3,6 @@ import { X, Printer, Check, Tag, Save } from 'lucide-react';
 import { useUserRole } from '../../context/UserContext';
 import { useParts } from '../../context/PartsContext';
 import { getInitials } from '../../lib/utils';
-import { supabase } from '../../lib/supabase';
 import QRCode from 'qrcode';
 
 interface PrintLabelModalProps {
@@ -101,15 +100,11 @@ export function PrintLabelModal({
     const dateKey = new Date().toISOString().slice(0, 10);
     const localCounterKey = `sugity_label_seq_${dateKey}`;
 
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('label_counters')
-          .select('seq')
-          .eq('date_key', dateKey)
-          .single();
-
-        const nextSeq = (!error && data) ? (data.seq + 1) : 1;
+    try {
+      const response = await fetch(`/api/label-counters/${dateKey}`);
+      if (response.ok) {
+        const data = await response.json();
+        const nextSeq = data.seq ? (data.seq + 1) : 1;
 
         if (!cancelled) {
           const now = new Date();
@@ -120,9 +115,9 @@ export function PrintLabelModal({
           localStorage.setItem(localCounterKey, String(nextSeq - 1));
         }
         return;
-      } catch (e) {
-        // fall through to localStorage
       }
+    } catch (e) {
+      // fall through to localStorage
     }
 
     if (!cancelled) {
@@ -529,33 +524,27 @@ export function PrintLabelModal({
         await handleBrowserPrint();
       }
 
-      // --- Increment label counter (cross-device via Supabase, localStorage fallback) ---
+      // --- Increment label counter (cross-device via REST API, localStorage fallback) ---
       const dateKey = new Date().toISOString().slice(0, 10);
       const localCounterKey = `sugity_label_seq_${dateKey}`;
 
-      if (supabase) {
-        try {
-          // Upsert with atomic increment: read current, write current+1
-          const { data: existing } = await supabase
-            .from('label_counters')
-            .select('seq')
-            .eq('date_key', dateKey)
-            .single();
-
-          const newSeq = existing ? existing.seq + 1 : 1;
-          await supabase
-            .from('label_counters')
-            .upsert({ date_key: dateKey, seq: newSeq }, { onConflict: 'date_key' });
-
-          // Keep localStorage in sync as offline cache
-          localStorage.setItem(localCounterKey, String(newSeq));
-        } catch (e) {
-          // Supabase failed — increment localStorage counter as fallback
-          const current = parseInt(localStorage.getItem(localCounterKey) || '0');
-          localStorage.setItem(localCounterKey, String(current + 1));
+      try {
+        const response = await fetch(`/api/label-counters/${dateKey}`);
+        let newSeq = 1;
+        if (response.ok) {
+          const data = await response.json();
+          newSeq = (data.seq || 0) + 1;
         }
-      } else {
-        // Offline fallback
+        await fetch('/api/label-counters', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date_key: dateKey, seq: newSeq })
+        });
+
+        // Keep localStorage in sync as offline cache
+        localStorage.setItem(localCounterKey, String(newSeq));
+      } catch (e) {
+        // REST API failed — increment localStorage counter as fallback
         const current = parseInt(localStorage.getItem(localCounterKey) || '0');
         localStorage.setItem(localCounterKey, String(current + 1));
       }

@@ -40,7 +40,7 @@ function OfflineBanner() {
     >
       <span className="text-lg leading-none flex-shrink-0">⚠️</span>
       <span className="flex-1">
-        <strong>OFFLINE MODE</strong> — Koneksi ke database Supabase terputus. Data yang dimasukkan{' '}
+        <strong>OFFLINE MODE</strong> — Koneksi ke database lokal terputus. Data yang dimasukkan{' '}
         <u>tidak akan tersinkron</u> ke device lain. Pastikan koneksi internet aktif.
         <span className="ml-2 opacity-70 font-medium">Terakhir dicek: {timeStr}</span>
       </span>

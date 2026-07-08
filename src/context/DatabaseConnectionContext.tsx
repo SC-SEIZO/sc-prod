@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { supabase } from '../lib/supabase';
 
 export type DbStatus = 'checking' | 'connected' | 'disconnected';
 
@@ -24,26 +23,12 @@ export function DatabaseConnectionProvider({ children }: { children: ReactNode }
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
 
   const checkConnection = useCallback(async () => {
-    // If supabase client was never initialized (missing env vars), mark as disconnected immediately
-    if (!supabase) {
-      setDbStatus('disconnected');
-      setLastChecked(new Date());
-      return;
-    }
-
     try {
-      // A lightweight ping: select 1 row limit from production_plans (or any table)
-      const { error } = await supabase
-        .from('production_plans')
-        .select('id', { count: 'exact', head: true })
-        .limit(1);
-
-      if (error) {
-        // If table doesn't exist or is a connection error, treat as disconnected
-        console.warn('[DB] Connection check failed:', error.message);
-        setDbStatus('disconnected');
-      } else {
+      const response = await fetch('/api/production-plans');
+      if (response.ok) {
         setDbStatus('connected');
+      } else {
+        setDbStatus('disconnected');
       }
     } catch (err) {
       console.warn('[DB] Connection check threw:', err);

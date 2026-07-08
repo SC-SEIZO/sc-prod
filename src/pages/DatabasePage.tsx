@@ -2934,7 +2934,7 @@ export function DatabasePage() {
               </span>
               {isLeaderDbConnected
                 ? 'The Leader Registry is synchronized via the app server. PINs are stored hashed + encrypted and are only revealed here for planners.'
-                : 'The leader service is unreachable. Verify the app server is running, Supabase credentials are set in .env, and the SQL migration below has been executed.'
+                : 'The leader service is unreachable. Verify the app server is running, database credentials are set in .env, and the SQL migration below has been executed.'
               }
             </div>
           </div>
@@ -3066,8 +3066,8 @@ export function DatabasePage() {
               {/* SQL Script block */}
               {!isLeaderDbConnected && (
                 <Card className="p-4 bg-slate-900 border border-white/5 text-white/90">
-                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-[#E76114] mb-2">Supabase SQL Schema</h4>
-                  <p className="text-[9px] text-slate-400 mb-3 leading-relaxed">Execute this query in your Supabase SQL Editor to enable cross-terminal sync:</p>
+                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-[#E76114] mb-2">PostgreSQL SQL Schema</h4>
+                  <p className="text-[9px] text-slate-400 mb-3 leading-relaxed">Execute this query in your PostgreSQL Database Editor to enable cross-terminal sync:</p>
                   <div className="relative">
                     <pre className="text-[9px] font-mono bg-slate-950 p-2.5 rounded border border-white/10 overflow-x-auto text-slate-300 max-h-[140px] select-all cursor-pointer">
 {`CREATE TABLE IF NOT EXISTS public.leaders (
@@ -3080,7 +3080,7 @@ export function DatabasePage() {
 );
 
 -- Lock the table away from browser (anon) clients.
--- The app server accesses it with SUPABASE_SERVICE_ROLE_KEY.
+-- The app server accesses it with DATABASE_URL.
 ALTER TABLE public.leaders ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow public read access" ON public.leaders;
 DROP POLICY IF EXISTS "Allow public write" ON public.leaders;

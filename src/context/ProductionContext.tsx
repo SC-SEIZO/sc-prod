@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useParts } from './PartsContext';
-import { supabase } from '../lib/supabase';
+import { io } from 'socket.io-client';
 
 export type JobStatus = 'completed' | 'dandori' | 'running' | 'queued';
 
@@ -355,50 +355,7 @@ const recalculateTimelineHelper = (items: Job[], dOT: string, nOT: string): Job[
   });
 };
 
-const savePlanToSupabase = async (
-  id: string,
-  planType: 'daily' | 'avg',
-  machineId: string,
-  dateKey: string,
-  jobs: Job[],
-  dayOT?: string,
-  nightOT?: string,
-  logsArray?: AbnormalityLog[]
-) => {
-  if (!supabase) return;
-  try {
-    const payload: any = {
-      id,
-      plan_type: planType,
-      machine_id: machineId,
-      date_key: dateKey,
-      jobs,
-      day_ot: dayOT || 'teiji',
-      night_ot: nightOT || 'teiji',
-      logs: logsArray || [],
-      updated_at: new Date().toISOString()
-    };
-
-    let { error } = await supabase
-      .from('production_plans')
-      .upsert(payload, { onConflict: 'id' });
-
-    if (error && error.message && error.message.includes("Could not find the 'logs' column")) {
-      console.warn("Supabase does not have 'logs' column. Retrying upsert without 'logs'...");
-      delete payload.logs;
-      const retry = await supabase
-        .from('production_plans')
-        .upsert(payload, { onConflict: 'id' });
-      error = retry.error;
-    }
-
-    if (error) {
-      console.error(`Failed to upsert plan ${id} to Supabase:`, error);
-    }
-  } catch (e) {
-    console.error(`Error saving plan ${id} to Supabase:`, e);
-  }
-};
+// savePlanToSupabase helper is moved inside the ProductionProvider component to access current states.
 
 export const ALL_ACTIVE_MACHINES = [
   // Fact 2
@@ -690,204 +647,166 @@ export function ProductionProvider({ children }: { children: React.ReactNode }) 
   const [activeAbnormalities, setActiveAbnormalities] = useState<Record<string, ActiveAbnormality>>({});
   const [activeNgs, setActiveNgs] = useState<Record<string, ActiveNg>>({});
 
-  // Load initial plans from Supabase on mount and expose sync function
-  const syncFromSupabase = async () => {
-    if (!supabase) return;
+  const savePlanToSupabase = async (
+    id: string,
+    planType: 'daily' | 'avg',
+    machineId: string,
+    dateKey: string,
+    jobs: Job[],
+    dayOT?: string,
+    nightOT?: string,
+    logsArray?: AbnormalityLog[],
+    isAbnormal?: boolean,
+    abnormalType?: string,
+    abnormalStart?: string,
+    isNg?: boolean,
+    ngType?: string,
+    ngStart?: string
+  ) => {
     try {
-      const { data, error } = await supabase
-        .from('production_plans')
-        .select('*');
-      
-      if (error) {
-        console.error('Failed to select production_plans from Supabase:', error);
-        return;
+      const currentAbnormal = activeAbnormalities[id] || { isAbnormal: false, type: '', start: '' };
+      const currentNg = activeNgs[id] || { isNg: false, type: '', start: '' };
+
+      const payload: any = {
+        id,
+        plan_type: planType,
+        machine_id: machineId,
+        date_key: dateKey,
+        jobs,
+        day_ot: dayOT || 'teiji',
+        night_ot: nightOT || 'teiji',
+        logs: logsArray || [],
+        is_abnormal: isAbnormal !== undefined ? isAbnormal : currentAbnormal.isAbnormal,
+        abnormal_type: abnormalType !== undefined ? abnormalType : currentAbnormal.type,
+        abnormal_start: abnormalStart !== undefined ? abnormalStart : currentAbnormal.start,
+        is_ng: isNg !== undefined ? isNg : currentNg.isNg,
+        ng_type: ngType !== undefined ? ngType : currentNg.type,
+        ng_start: ngStart !== undefined ? ngStart : currentNg.start
+      };
+
+      const response = await fetch('/api/production-plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        console.error(`Failed to save plan ${id} to backend`);
       }
-
-      const loadedJobs: Record<string, Job[]> = {};
-      const loadedAvgJobs: Record<string, Job[]> = {};
-      const loadedDayOTs: Record<string, string> = {};
-      const loadedNightOTs: Record<string, string> = {};
-      const loadedAbnormalities: Record<string, ActiveAbnormality> = {};
-      const loadedNgs: Record<string, ActiveNg> = {};
-
-      const loadedLogs: Record<string, AbnormalityLog[]> = {};
-      const hasAbnormalColumns = data && data.length > 0 && 'is_abnormal' in data[0];
-      const hasNgColumns = data && data.length > 0 && 'is_ng' in data[0];
-      const hasLogsColumn = data && data.length > 0 && 'logs' in data[0];
-
-      if (data && data.length > 0) {
-        data.forEach(row => {
-          if (row.plan_type === 'daily') {
-            loadedJobs[row.id] = row.jobs || [];
-          } else if (row.plan_type === 'avg') {
-            loadedAvgJobs[row.id] = row.jobs || [];
-          }
-          if (row.day_ot) loadedDayOTs[row.id] = row.day_ot;
-          if (row.night_ot) loadedNightOTs[row.id] = row.night_ot;
-          if (hasLogsColumn && row.logs) {
-            loadedLogs[row.id] = row.logs;
-          }
-
-          if (hasAbnormalColumns) {
-            const isAbnormal = !!row.is_abnormal;
-            const type = row.abnormal_type || '';
-            const start = row.abnormal_start || '';
-            loadedAbnormalities[row.id] = { isAbnormal, type, start };
-          }
-
-          if (hasNgColumns) {
-            const isNg = !!row.is_ng;
-            const type = row.ng_type || '';
-            const start = row.ng_start || '';
-            loadedNgs[row.id] = { isNg, type, start };
-          }
-        });
-      }
-
-      // Helper to merge database truth with local states respecting 5s lockout window
-      function filterStateByLockout<T>(prev: Record<string, T>, loaded: Record<string, T>): Record<string, T> {
-        const next = { ...prev };
-        // 1. Update/Add keys from database if not locked
-        Object.keys(loaded).forEach(key => {
-          const lastWrite = lastLocalWriteRef.current[key];
-          if (!lastWrite || Date.now() - lastWrite >= 5000) {
-            next[key] = loaded[key];
-          }
-        });
-        // 2. Remove keys deleted in database if not locked
-        Object.keys(prev).forEach(key => {
-          if (loaded[key] === undefined) {
-            const lastWrite = lastLocalWriteRef.current[key];
-            if (!lastWrite || Date.now() - lastWrite >= 5000) {
-              delete next[key];
-            }
-          }
-        });
-        return next;
-      }
-
-      setMachineJobs(prev => filterStateByLockout(prev, loadedJobs));
-      setMachineAvgJobs(prev => filterStateByLockout(prev, loadedAvgJobs));
-      setDayOTs(prev => filterStateByLockout(prev, loadedDayOTs));
-      setNightOTs(prev => filterStateByLockout(prev, loadedNightOTs));
-      setLogs(prev => filterStateByLockout(prev, loadedLogs));
-      
-      if (hasAbnormalColumns) {
-        setActiveAbnormalities(prev => filterStateByLockout(prev, loadedAbnormalities));
-      } else {
-        setActiveAbnormalities({});
-      }
-
-      if (hasNgColumns) {
-        setActiveNgs(prev => filterStateByLockout(prev, loadedNgs));
-      } else {
-        setActiveNgs({});
-      }
-    } catch (err) {
-      console.error('Error fetching plans from Supabase:', err);
+    } catch (e) {
+      console.error(`Error saving plan ${id} to backend:`, e);
     }
   };
 
+  // Load initial plans from Express backend on mount and expose sync function
+  const syncFromSupabase = async () => {
+    try {
+      const response = await fetch('/api/production-plans');
+      if (response.ok) {
+        const data = await response.json();
+        
+        const loadedJobs: Record<string, Job[]> = {};
+        const loadedAvgJobs: Record<string, Job[]> = {};
+        const loadedDayOTs: Record<string, string> = {};
+        const loadedNightOTs: Record<string, string> = {};
+        const loadedAbnormalities: Record<string, ActiveAbnormality> = {};
+        const loadedNgs: Record<string, ActiveNg> = {};
+        const loadedLogs: Record<string, AbnormalityLog[]> = {};
+
+        if (data && data.length > 0) {
+          data.forEach((row: any) => {
+            if (row.plan_type === 'daily') {
+              loadedJobs[row.id] = row.jobs || [];
+            } else if (row.plan_type === 'avg') {
+              loadedAvgJobs[row.id] = row.jobs || [];
+            }
+            if (row.day_ot) loadedDayOTs[row.id] = row.day_ot;
+            if (row.night_ot) loadedNightOTs[row.id] = row.night_ot;
+            if (row.logs) {
+              loadedLogs[row.id] = row.logs;
+            }
+            loadedAbnormalities[row.id] = { 
+              isAbnormal: !!row.is_abnormal, 
+              type: row.abnormal_type || '', 
+              start: row.abnormal_start || '' 
+            };
+            loadedNgs[row.id] = { 
+              isNg: !!row.is_ng, 
+              type: row.ng_type || '', 
+              start: row.ng_start || '' 
+            };
+          });
+        }
+
+        // Helper to merge database truth with local states respecting 5s lockout window
+        function filterStateByLockout<T>(prev: Record<string, T>, loaded: Record<string, T>): Record<string, T> {
+          const next = { ...prev };
+          Object.keys(loaded).forEach(key => {
+            const lastWrite = lastLocalWriteRef.current[key];
+            if (!lastWrite || Date.now() - lastWrite >= 5000) {
+              next[key] = loaded[key];
+            }
+          });
+          Object.keys(prev).forEach(key => {
+            if (loaded[key] === undefined) {
+              const lastWrite = lastLocalWriteRef.current[key];
+              if (!lastWrite || Date.now() - lastWrite >= 5000) {
+                delete next[key];
+              }
+            }
+          });
+          return next;
+        }
+
+        setMachineJobs(prev => filterStateByLockout(prev, loadedJobs));
+        setMachineAvgJobs(prev => filterStateByLockout(prev, loadedAvgJobs));
+        setDayOTs(prev => filterStateByLockout(prev, loadedDayOTs));
+        setNightOTs(prev => filterStateByLockout(prev, loadedNightOTs));
+        setLogs(prev => filterStateByLockout(prev, loadedLogs));
+        setActiveAbnormalities(prev => filterStateByLockout(prev, loadedAbnormalities));
+        setActiveNgs(prev => filterStateByLockout(prev, loadedNgs));
+      }
+    } catch (err) {
+      console.error('Error fetching plans from backend:', err);
+    }
+  };
+
+  // Socket.io Real-Time Synchronization
   useEffect(() => {
     syncFromSupabase();
 
-    if (!supabase) return; // Guard: skip realtime subscription if Supabase is not configured
+    const socket = io();
+    socket.on('production_plan_updated', (row: any) => {
+      const lastWrite = lastLocalWriteRef.current[row.id];
+      if (lastWrite && Date.now() - lastWrite < 5000) {
+        return; // Skip realtime update during lockout
+      }
 
-    // Subscribe to realtime changes in production_plans table
-    const channel = supabase
-      .channel('realtime_production_plans')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'production_plans'
-        },
-        (payload: any) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const row = payload.new;
-            
-            const lastWrite = lastLocalWriteRef.current[row.id];
-            if (lastWrite && Date.now() - lastWrite < 5000) {
-              return; // Skip realtime update during lockout
-            }
-
-            if (row.plan_type === 'daily') {
-              setMachineJobs(prev => ({ ...prev, [row.id]: row.jobs || [] }));
-            } else if (row.plan_type === 'avg') {
-              setMachineAvgJobs(prev => ({ ...prev, [row.id]: row.jobs || [] }));
-            }
-            if (row.day_ot) setDayOTs(prev => ({ ...prev, [row.id]: row.day_ot }));
-            if (row.night_ot) setNightOTs(prev => ({ ...prev, [row.id]: row.night_ot }));
-            if ('logs' in row && row.logs) {
-              setLogs(prev => ({ ...prev, [row.id]: row.logs }));
-            }
-
-            if ('is_abnormal' in row) {
-              const isAbnormal = !!row.is_abnormal;
-              const type = row.abnormal_type || '';
-              const start = row.abnormal_start || '';
-              
-              setActiveAbnormalities(prev => ({
-                ...prev,
-                [row.id]: { isAbnormal, type, start }
-              }));
-            }
-
-            if ('is_ng' in row) {
-              const isNg = !!row.is_ng;
-              const type = row.ng_type || '';
-              const start = row.ng_start || '';
-
-              setActiveNgs(prev => ({
-                ...prev,
-                [row.id]: { isNg, type, start }
-              }));
-            }
-          } else if (payload.eventType === 'DELETE') {
-            const row = payload.old;
-            
-            const lastWrite = lastLocalWriteRef.current[row.id];
-            if (lastWrite && Date.now() - lastWrite < 5000) {
-              return; // Skip realtime delete during lockout
-            }
-
-            setMachineJobs(prev => {
-              const updated = { ...prev };
-              delete updated[row.id];
-              return updated;
-            });
-            setMachineAvgJobs(prev => {
-              const updated = { ...prev };
-              delete updated[row.id];
-              return updated;
-            });
-            setActiveAbnormalities(prev => {
-              const updated = { ...prev };
-              delete updated[row.id];
-              return updated;
-            });
-            setActiveNgs(prev => {
-              const updated = { ...prev };
-              delete updated[row.id];
-              return updated;
-            });
-            setLogs(prev => {
-              const updated = { ...prev };
-              delete updated[row.id];
-              return updated;
-            });
-          }
-        }
-      )
-      .subscribe();
+      if (row.plan_type === 'daily') {
+        setMachineJobs(prev => ({ ...prev, [row.id]: row.jobs || [] }));
+      } else if (row.plan_type === 'avg') {
+        setMachineAvgJobs(prev => ({ ...prev, [row.id]: row.jobs || [] }));
+      }
+      if (row.day_ot) setDayOTs(prev => ({ ...prev, [row.id]: row.day_ot }));
+      if (row.night_ot) setNightOTs(prev => ({ ...prev, [row.id]: row.night_ot }));
+      if (row.logs) {
+        setLogs(prev => ({ ...prev, [row.id]: row.logs }));
+      }
+      setActiveAbnormalities(prev => ({
+        ...prev,
+        [row.id]: { isAbnormal: !!row.is_abnormal, type: row.abnormal_type || '', start: row.abnormal_start || '' }
+      }));
+      setActiveNgs(prev => ({
+        ...prev,
+        [row.id]: { isNg: !!row.is_ng, type: row.ng_type || '', start: row.ng_start || '' }
+      }));
+    });
 
     return () => {
-      if (supabase) supabase.removeChannel(channel);
+      socket.disconnect();
     };
   }, []);
 
-  // Periodic polling every 10 seconds for auto-refresh and database fallback sync
+  // Periodic polling every 10 seconds for fallback
   useEffect(() => {
     const interval = setInterval(() => {
       syncFromSupabase();
@@ -1371,17 +1290,15 @@ export function ProductionProvider({ children }: { children: React.ReactNode }) 
       return { ...prev, [finalKey]: newLogs };
     });
 
-    if (supabase) {
-      const parsedMachineId = finalKey.length > 11 ? finalKey.substring(11) : finalKey;
-      const dateKey = finalKey.substring(0, 10);
-      const currentJobs = machineJobs[finalKey] || [];
-      const dOT = dayOTs[finalKey] || 'teiji';
-      const nOT = nightOTs[finalKey] || 'teiji';
+    const parsedMachineId = finalKey.length > 11 ? finalKey.substring(11) : finalKey;
+    const dateKey = finalKey.substring(0, 10);
+    const currentJobs = machineJobs[finalKey] || [];
+    const dOT = dayOTs[finalKey] || 'teiji';
+    const nOT = nightOTs[finalKey] || 'teiji';
 
-      setTimeout(() => {
-        savePlanToSupabase(finalKey, 'daily', parsedMachineId, dateKey, currentJobs, dOT, nOT, updatedLogs);
-      }, 0);
-    }
+    setTimeout(() => {
+      savePlanToSupabase(finalKey, 'daily', parsedMachineId, dateKey, currentJobs, dOT, nOT, updatedLogs);
+    }, 0);
   };
 
   const setMachineNg = (
@@ -1429,43 +1346,14 @@ export function ProductionProvider({ children }: { children: React.ReactNode }) 
       [finalKey]: { isNg, type: typeStr, start: startStr }
     }));
 
-    // Persist NG state to Supabase as part of the daily plan payload
-    if (supabase) {
-      const dOT = dayOTs[finalKey] || 'teiji';
-      const nOT = nightOTs[finalKey] || 'teiji';
-      const date = finalKey.substring(0, 10);
-      const currentJobs = machineJobs[finalKey] || [];
+    const dOT = dayOTs[finalKey] || 'teiji';
+    const nOT = nightOTs[finalKey] || 'teiji';
+    const date = finalKey.substring(0, 10);
+    const currentJobs = machineJobs[finalKey] || [];
 
-      const payload: any = {
-        id: finalKey,
-        plan_type: 'daily',
-        machine_id: parsedMachineId,
-        date_key: date,
-        is_ng: isNg,
-        ng_type: typeStr,
-        ng_start: startStr,
-        jobs: currentJobs,
-        day_ot: dOT,
-        night_ot: nOT,
-        logs: nextLogs,
-        updated_at: new Date().toISOString()
-      };
-
-      supabase
-        .from('production_plans')
-        .upsert(payload, { onConflict: 'id' })
-        .then(async ({ error }) => {
-          if (error) {
-            // Graceful fallback: retry without optional columns if they don't exist yet
-            delete payload.is_ng;
-            delete payload.ng_type;
-            delete payload.ng_start;
-            delete payload.logs;
-            await supabase.from('production_plans').upsert(payload, { onConflict: 'id' });
-          }
-        })
-        .catch(() => {});
-    }
+    setTimeout(() => {
+      savePlanToSupabase(finalKey, 'daily', parsedMachineId, date, currentJobs, dOT, nOT, nextLogs, undefined, undefined, undefined, isNg, typeStr, startStr);
+    }, 0);
   };
 
   const reviseJobNgQty = (
@@ -1584,47 +1472,12 @@ export function ProductionProvider({ children }: { children: React.ReactNode }) 
       [finalKey]: { isAbnormal, type: typeStr, start: startStr }
     }));
 
-    // 3. Upsert state to Supabase production_plans table
-    if (supabase) {
-      const dOT = dayOTs[finalKey] || 'teiji';
-      const nOT = nightOTs[finalKey] || 'teiji';
+    const dOT = dayOTs[finalKey] || 'teiji';
+    const nOT = nightOTs[finalKey] || 'teiji';
 
-      const payload: any = {
-        id: finalKey,
-        plan_type: 'daily',
-        machine_id: parsedMachineId,
-        date_key: date,
-        is_abnormal: isAbnormal,
-        abnormal_type: typeStr,
-        abnormal_start: startStr,
-        jobs: nextJobs,
-        day_ot: dOT,
-        night_ot: nOT,
-        logs: nextLogs,
-        updated_at: new Date().toISOString()
-      };
-
-      supabase
-        .from('production_plans')
-        .upsert(payload, { onConflict: 'id' })
-        .then(async ({ error }) => {
-          if (error && error.message && error.message.includes("Could not find the 'logs' column")) {
-            console.warn("Supabase does not have 'logs' column. Retrying abnormality upsert without 'logs'...");
-            delete payload.logs;
-            const { error: retryError } = await supabase
-              .from('production_plans')
-              .upsert(payload, { onConflict: 'id' });
-            if (retryError) {
-              console.error(`Failed to retry upserting abnormality state for plan ${finalKey}:`, retryError);
-            }
-          } else if (error) {
-            console.error(`Failed to upsert abnormality state for plan ${finalKey}:`, error);
-          }
-        })
-        .catch(err => {
-          console.error(`Error upserting abnormality state for plan ${finalKey}:`, err);
-        });
-    }
+    setTimeout(() => {
+      savePlanToSupabase(finalKey, 'daily', parsedMachineId, date, nextJobs, dOT, nOT, nextLogs, isAbnormal, typeStr, startStr);
+    }, 0);
   };
 
   return (

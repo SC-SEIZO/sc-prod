@@ -2,9 +2,11 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
+import http from 'http';
+import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
-import { createClient } from '@supabase/supabase-js';
+import { pool } from './db';
 import { JWT_SECRET, signJwt, verifyJwt, parseCookies, checkRateLimit, recordFailure, recordSuccess, getMemberPin, getClientIp } from './api/_lib';
 
 
@@ -19,13 +21,7 @@ import { JWT_SECRET, signJwt, verifyJwt, parseCookies, checkRateLimit, recordFai
 //                     planner registry can still display the original PIN
 // Requires (see .env):
 //   PIN_ENCRYPTION_KEY        64 hex chars (32 bytes) encryption key
-//   SUPABASE_SERVICE_ROLE_KEY service key so the server can access the
-//                             leaders table once RLS locks out anon clients
 // ---------------------------------------------------------------------------
-
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
-const supabaseAdmin = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 // Admin PIN gating the planner-only endpoints (register/delete/reveal leaders).
 // Kept in sync with the planner portal PIN.
@@ -85,24 +81,17 @@ const decryptPin = (blob: string | null | undefined): string | null => {
 // One-time lazy migration: hash + encrypt any legacy plaintext PINs, then blank them.
 let pinMigrationDone = false;
 const migrateLegacyPins = async () => {
-  if (pinMigrationDone || !supabaseAdmin) return;
+  if (pinMigrationDone) return;
   try {
-    const { data, error } = await supabaseAdmin.from('leaders').select('id, pin, pin_hash');
-    if (error) {
-      // Columns may not exist yet — instruct via log, don't crash.
-      console.warn('[leaders] PIN migration skipped:', error.message, '— run migration_leader_pins.sql in Supabase.');
-      return;
-    }
-    for (const row of data || []) {
+    const { rows } = await pool.query('SELECT id, pin, pin_hash FROM leaders');
+    for (const row of rows || []) {
       if (row.pin && !row.pin_hash) {
-        const update: any = { pin_hash: hashPin(row.pin), pin: null };
+        const pinHash = hashPin(row.pin);
         const enc = encryptPin(row.pin);
-        if (enc) update.pin_encrypted = enc;
-        const { error: upErr } = await supabaseAdmin.from('leaders').update(update).eq('id', row.id);
-        if (upErr) {
-          console.warn('[leaders] Failed migrating PIN for leader', row.id, upErr.message);
-          return;
-        }
+        await pool.query(
+          'UPDATE leaders SET pin_hash = $1, pin_encrypted = $2, pin = NULL WHERE id = $3',
+          [pinHash, enc, row.id]
+        );
         console.log('[leaders] Migrated plaintext PIN to hash for leader', row.id);
       }
     }
@@ -124,8 +113,8 @@ async function startServer() {
   // Leader PIN API (PINs never leave the server in list responses)
   // ------------------------------------------------------------------
   const requireDb = (res: express.Response): boolean => {
-    if (!supabaseAdmin) {
-      res.status(503).json({ error: 'Supabase is not configured on the server.' });
+    if (!pool) {
+      res.status(503).json({ error: 'Database is not configured on the server.' });
       return false;
     }
     return true;
@@ -146,32 +135,34 @@ async function startServer() {
   // Public: leader names only — no PIN data of any form.
   app.get('/api/leaders', async (_req, res) => {
     if (!requireDb(res)) return;
-    await migrateLegacyPins();
-    const { data, error } = await supabaseAdmin!
-      .from('leaders')
-      .select('id, name, created_at')
-      .order('created_at', { ascending: true });
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ leaders: data || [] });
+    try {
+      await migrateLegacyPins();
+      const { rows } = await pool.query('SELECT id, name, created_at FROM leaders ORDER BY created_at ASC');
+      res.json({ leaders: rows || [] });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Public: verify a PIN. Returns the matched leader's identity only.
   app.post('/api/leaders/verify', async (req, res) => {
     if (!requireDb(res)) return;
-    await migrateLegacyPins();
-    const pin = String(req.body?.pin || '').trim();
-    if (!pin) return res.status(400).json({ error: 'PIN is required.' });
+    try {
+      await migrateLegacyPins();
+      const pin = String(req.body?.pin || '').trim();
+      if (!pin) return res.status(400).json({ error: 'PIN is required.' });
 
-    if (pin === MASTER_LEADER_PIN) {
-      return res.json({ leader: { id: 'master', name: 'Master Leader' } });
+      if (pin === MASTER_LEADER_PIN) {
+        return res.json({ leader: { id: 'master', name: 'Master Leader' } });
+      }
+
+      const { rows } = await pool.query('SELECT id, name, pin, pin_hash FROM leaders');
+      const match = (rows || []).find(l => verifyPinHash(pin, l.pin_hash) || (l.pin && l.pin === pin));
+      if (!match) return res.status(401).json({ error: 'Invalid Leader PIN.' });
+      res.json({ leader: { id: match.id, name: match.name } });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
-
-    const { data, error } = await supabaseAdmin!.from('leaders').select('id, name, pin, pin_hash');
-    if (error) return res.status(500).json({ error: error.message });
-
-    const match = (data || []).find(l => verifyPinHash(pin, l.pin_hash) || (l.pin && l.pin === pin));
-    if (!match) return res.status(401).json({ error: 'Invalid Leader PIN.' });
-    res.json({ leader: { id: match.id, name: match.name } });
   });
 
   // ------------------------------------------------------------------
@@ -200,13 +191,12 @@ async function startServer() {
         return res.status(429).json({ error: `Too many login attempts. Locked out. Try again in ${check.remainingSeconds}s.` });
       }
 
-      const { data: user, error } = await supabaseAdmin!
-        .from('users')
-        .select('id, username, role, name, password_hash')
-        .eq('username', username)
-        .maybeSingle();
+      const { rows } = await pool.query(
+        'SELECT id, username, role, name, password_hash FROM users WHERE username = $1 LIMIT 1',
+        [username]
+      );
+      const user = rows[0];
 
-      if (error) return res.status(500).json({ error: error.message });
       if (!user || !user.password_hash) {
         const limitResult = recordFailure(rateLimitKey as string);
         if (limitResult.lockedOut) {
@@ -372,13 +362,10 @@ async function startServer() {
 
     try {
       if (method === 'GET') {
-        const { data: users, error } = await supabaseAdmin!
-          .from('users')
-          .select('id, uid, username, role, name, photo_url, created_at')
-          .order('created_at', { ascending: false });
-
-        if (error) return res.status(500).json({ error: error.message });
-        return res.json({ users: users || [] });
+        const { rows } = await pool.query(
+          'SELECT id, uid, username, role, name, photo_url, created_at FROM users ORDER BY created_at DESC'
+        );
+        return res.json({ users: rows || [] });
       }
 
       if (method === 'POST') {
@@ -400,26 +387,20 @@ async function startServer() {
           return res.status(400).json({ error: 'Invalid user role specified.' });
         }
 
-        const { data, error } = await supabaseAdmin!
-          .from('users')
-          .insert({
-            uid: `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            username,
-            role,
-            name,
-            password_hash: hashPin(password)
-          })
-          .select('id, username, role, name, created_at')
-          .single();
-
-        if (error) {
-          if (error.code === '23505') {
+        const uid = `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const passHash = hashPin(password);
+        try {
+          const { rows } = await pool.query(
+            'INSERT INTO users (uid, username, role, name, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, role, name, created_at',
+            [uid, username, role, name, passHash]
+          );
+          return res.status(201).json({ success: true, user: rows[0] });
+        } catch (err: any) {
+          if (err.code === '23505') {
             return res.status(400).json({ error: 'Username already registered.' });
           }
-          return res.status(500).json({ error: error.message });
+          return res.status(500).json({ error: err.message });
         }
-
-        return res.status(201).json({ success: true, user: data });
       }
 
       if (method === 'PUT') {
@@ -442,20 +423,20 @@ async function startServer() {
           return res.status(400).json({ error: 'Invalid user role specified.' });
         }
 
-        const updatePayload: any = { username, role, name };
         if (password) {
-          updatePayload.password_hash = hashPin(password);
+          const passHash = hashPin(password);
+          const { rows } = await pool.query(
+            'UPDATE users SET username = $1, role = $2, name = $3, password_hash = $4 WHERE id = $5 RETURNING id, username, role, name, created_at',
+            [username, role, name, passHash, id]
+          );
+          return res.json({ success: true, user: rows[0] });
+        } else {
+          const { rows } = await pool.query(
+            'UPDATE users SET username = $1, role = $2, name = $3 WHERE id = $4 RETURNING id, username, role, name, created_at',
+            [username, role, name, id]
+          );
+          return res.json({ success: true, user: rows[0] });
         }
-
-        const { data, error } = await supabaseAdmin!
-          .from('users')
-          .update(updatePayload)
-          .eq('id', id)
-          .select('id, username, role, name, created_at')
-          .single();
-
-        if (error) return res.status(500).json({ error: error.message });
-        return res.json({ success: true, user: data });
       }
 
       if (method === 'DELETE') {
@@ -469,12 +450,7 @@ async function startServer() {
           return res.status(400).json({ error: 'You cannot delete your own Super Admin account.' });
         }
 
-        const { error } = await supabaseAdmin!
-          .from('users')
-          .delete()
-          .eq('id', id);
-
-        if (error) return res.status(500).json({ error: error.message });
+        await pool.query('DELETE FROM users WHERE id = $1', [id]);
         return res.json({ success: true });
       }
 
@@ -489,50 +465,58 @@ async function startServer() {
   app.post('/api/leaders', async (req, res) => {
     if (!requireDb(res)) return;
     if (!requirePlannerAdmin(req, res)) return;
-    await migrateLegacyPins();
+    try {
+      await migrateLegacyPins();
 
-    const name = String(req.body?.name || '').trim();
-    const pin = String(req.body?.pin || '').trim();
-    if (!name) return res.status(400).json({ error: 'Name is required.' });
-    if (pin.length !== 4) return res.status(400).json({ error: 'PIN must be exactly 4 characters.' });
-    if (pin === MASTER_LEADER_PIN) return res.status(409).json({ error: 'This PIN code is reserved.' });
+      const name = String(req.body?.name || '').trim();
+      const pin = String(req.body?.pin || '').trim();
+      if (!name) return res.status(400).json({ error: 'Name is required.' });
+      if (pin.length !== 4) return res.status(400).json({ error: 'PIN must be exactly 4 characters.' });
+      if (pin === MASTER_LEADER_PIN) return res.status(409).json({ error: 'This PIN code is reserved.' });
 
-    const { data: existing, error: selErr } = await supabaseAdmin!.from('leaders').select('id, pin, pin_hash');
-    if (selErr) return res.status(500).json({ error: selErr.message });
-    const duplicate = (existing || []).some(l => verifyPinHash(pin, l.pin_hash) || (l.pin && l.pin === pin));
-    if (duplicate) return res.status(409).json({ error: 'This PIN code is already registered.' });
+      const { rows: existing } = await pool.query('SELECT id, pin, pin_hash FROM leaders');
+      const duplicate = (existing || []).some(l => verifyPinHash(pin, l.pin_hash) || (l.pin && l.pin === pin));
+      if (duplicate) return res.status(409).json({ error: 'This PIN code is already registered.' });
 
-    const payload: any = { name, pin_hash: hashPin(pin) };
-    const enc = encryptPin(pin);
-    if (enc) payload.pin_encrypted = enc;
-
-    const { data, error } = await supabaseAdmin!.from('leaders').insert(payload).select('id, name, created_at');
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ leader: data?.[0] || null });
+      const enc = encryptPin(pin);
+      const { rows } = await pool.query(
+        'INSERT INTO leaders (name, pin_hash, pin_encrypted) VALUES ($1, $2, $3) RETURNING id, name, created_at',
+        [name, hashPin(pin), enc]
+      );
+      res.json({ leader: rows[0] || null });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Planner only: delete a leader by id.
   app.delete('/api/leaders/:id', async (req, res) => {
     if (!requireDb(res)) return;
     if (!requirePlannerAdmin(req, res)) return;
-    const { error } = await supabaseAdmin!.from('leaders').delete().eq('id', req.params.id);
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ success: true });
+    try {
+      await pool.query('DELETE FROM leaders WHERE id = $1', [req.params.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Planner only: reveal decrypted PINs for the registry screen.
   app.get('/api/leaders/pins', async (req, res) => {
     if (!requireDb(res)) return;
     if (!requirePlannerAdmin(req, res)) return;
-    await migrateLegacyPins();
-    const { data, error } = await supabaseAdmin!.from('leaders').select('id, name, pin, pin_encrypted');
-    if (error) return res.status(500).json({ error: error.message });
-    const pins = (data || []).map(l => ({
-      id: l.id,
-      name: l.name,
-      pin: decryptPin(l.pin_encrypted) || l.pin || null
-    }));
-    res.json({ pins, encryptionConfigured: !!getEncryptionKey() });
+    try {
+      await migrateLegacyPins();
+      const { rows } = await pool.query('SELECT id, name, pin, pin_encrypted FROM leaders');
+      const pins = (rows || []).map(l => ({
+        id: l.id,
+        name: l.name,
+        pin: decryptPin(l.pin_encrypted) || l.pin || null
+      }));
+      res.json({ pins, encryptionConfigured: !!getEncryptionKey() });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // AI Extraction API Route
@@ -618,6 +602,287 @@ async function startServer() {
     }
   });
 
+  // ------------------------------------------------------------------
+  // Master Parts APIs
+  // ------------------------------------------------------------------
+  app.get('/api/parts', async (_req, res) => {
+    try {
+      const { rows } = await pool.query('SELECT * FROM master_parts ORDER BY part_number ASC');
+      res.json(rows || []);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/parts', async (req, res) => {
+    try {
+      const p = req.body;
+      const query = `
+        INSERT INTO master_parts (
+          part_number, part_name, home_line, backup_line, model, sebango, material, area, tonnage, 
+          cavity, mold, weight, shikake, spec, process, customer, customer_pno, customer_sebango,
+          cycle_time, daily_requirement_n, daily_requirement_n1, daily_requirement_n2, daily_requirement_n3,
+          month_n_forecast, month_n1_forecast, month_n2_forecast, month_n3_forecast, monthly_forecasts
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+        ON CONFLICT (part_number) DO UPDATE SET
+          part_name = EXCLUDED.part_name,
+          home_line = EXCLUDED.home_line,
+          backup_line = EXCLUDED.backup_line,
+          model = EXCLUDED.model,
+          sebango = EXCLUDED.sebango,
+          material = EXCLUDED.material,
+          area = EXCLUDED.area,
+          tonnage = EXCLUDED.tonnage,
+          cavity = EXCLUDED.cavity,
+          mold = EXCLUDED.mold,
+          weight = EXCLUDED.weight,
+          shikake = EXCLUDED.shikake,
+          spec = EXCLUDED.spec,
+          process = EXCLUDED.process,
+          customer = EXCLUDED.customer,
+          customer_pno = EXCLUDED.customer_pno,
+          customer_sebango = EXCLUDED.customer_sebango,
+          cycle_time = EXCLUDED.cycle_time,
+          daily_requirement_n = EXCLUDED.daily_requirement_n,
+          daily_requirement_n1 = EXCLUDED.daily_requirement_n1,
+          daily_requirement_n2 = EXCLUDED.daily_requirement_n2,
+          daily_requirement_n3 = EXCLUDED.daily_requirement_n3,
+          month_n_forecast = EXCLUDED.month_n_forecast,
+          month_n1_forecast = EXCLUDED.month_n1_forecast,
+          month_n2_forecast = EXCLUDED.month_n2_forecast,
+          month_n3_forecast = EXCLUDED.month_n3_forecast,
+          monthly_forecasts = EXCLUDED.monthly_forecasts
+        RETURNING *
+      `;
+      const values = [
+        p.part_number, p.part_name, p.home_line, p.backup_line, p.model, p.sebango, p.material, p.area, p.tonnage,
+        p.cavity, p.mold, p.weight, p.shikake, p.spec, p.process, p.customer, p.customer_pno, p.customer_sebango,
+        p.cycle_time || p.cycletime, p.daily_requirement_n, p.daily_requirement_n1, p.daily_requirement_n2, p.daily_requirement_n3,
+        p.month_n_forecast, p.month_n1_forecast, p.month_n2_forecast, p.month_n3_forecast, JSON.stringify(p.monthly_forecasts || {})
+      ];
+      const { rows } = await pool.query(query, values);
+      res.json(rows[0]);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/parts/import', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const payloads = req.body;
+      for (const p of payloads) {
+        const query = `
+          INSERT INTO master_parts (
+            part_number, part_name, home_line, backup_line, model, sebango, material, area, tonnage, 
+            cavity, mold, weight, shikake, spec, process, customer, customer_pno, customer_sebango,
+            cycle_time, daily_requirement_n, daily_requirement_n1, daily_requirement_n2, daily_requirement_n3,
+            month_n_forecast, month_n1_forecast, month_n2_forecast, month_n3_forecast, monthly_forecasts
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+          ON CONFLICT (part_number) DO UPDATE SET
+            part_name = EXCLUDED.part_name,
+            home_line = EXCLUDED.home_line,
+            backup_line = EXCLUDED.backup_line,
+            model = EXCLUDED.model,
+            sebango = EXCLUDED.sebango,
+            material = EXCLUDED.material,
+            area = EXCLUDED.area,
+            tonnage = EXCLUDED.tonnage,
+            cavity = EXCLUDED.cavity,
+            mold = EXCLUDED.mold,
+            weight = EXCLUDED.weight,
+            shikake = EXCLUDED.shikake,
+            spec = EXCLUDED.spec,
+            process = EXCLUDED.process,
+            customer = EXCLUDED.customer,
+            customer_pno = EXCLUDED.customer_pno,
+            customer_sebango = EXCLUDED.customer_sebango,
+            cycle_time = EXCLUDED.cycle_time,
+            daily_requirement_n = EXCLUDED.daily_requirement_n,
+            daily_requirement_n1 = EXCLUDED.daily_requirement_n1,
+            daily_requirement_n2 = EXCLUDED.daily_requirement_n2,
+            daily_requirement_n3 = EXCLUDED.daily_requirement_n3,
+            month_n_forecast = EXCLUDED.month_n_forecast,
+            month_n1_forecast = EXCLUDED.month_n1_forecast,
+            month_n2_forecast = EXCLUDED.month_n2_forecast,
+            month_n3_forecast = EXCLUDED.month_n3_forecast,
+            monthly_forecasts = EXCLUDED.monthly_forecasts
+        `;
+        const values = [
+          p.part_number, p.part_name, p.home_line, p.backup_line, p.model, p.sebango, p.material, p.area, p.tonnage,
+          p.cavity, p.mold, p.weight, p.shikake, p.spec, p.process, p.customer, p.customer_pno, p.customer_sebango,
+          p.cycle_time || p.cycletime, p.daily_requirement_n, p.daily_requirement_n1, p.daily_requirement_n2, p.daily_requirement_n3,
+          p.month_n_forecast, p.month_n1_forecast, p.month_n2_forecast, p.month_n3_forecast, JSON.stringify(p.monthly_forecasts || {})
+        ];
+        await client.query(query, values);
+      }
+      await client.query('COMMIT');
+      res.json({ success: true, count: payloads.length });
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: error.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete('/api/parts/:part_number', async (req, res) => {
+    try {
+      const { part_number } = req.params;
+      await pool.query('DELETE FROM master_parts WHERE part_number = $1', [part_number]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/parts', async (_req, res) => {
+    try {
+      await pool.query("DELETE FROM master_parts WHERE id != '00000000-0000-0000-0000-000000000000'::uuid");
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // History Orders APIs
+  // ------------------------------------------------------------------
+  app.get('/api/history-orders', async (_req, res) => {
+    try {
+      const { rows } = await pool.query('SELECT * FROM history_orders ORDER BY created_at DESC');
+      res.json(rows || []);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/history-orders', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const rows = req.body;
+      for (const r of rows) {
+        const query = `
+          INSERT INTO history_orders (
+            batch_id, created_at, sebango, part_number, part_name, 
+            month_n_volume, month_n1_volume, month_n2_volume, month_n3_volume, 
+            daily_requirement_n, daily_requirement_n1, daily_requirement_n2, daily_requirement_n3
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `;
+        const values = [
+          r.batch_id, r.created_at, r.sebango, r.part_number, r.part_name,
+          r.month_n_volume, r.month_n1_volume, r.month_n2_volume, r.month_n3_volume,
+          r.daily_requirement_n, r.daily_requirement_n1, r.daily_requirement_n2, r.daily_requirement_n3
+        ];
+        await client.query(query, values);
+      }
+      await client.query('COMMIT');
+      res.json({ success: true, count: rows.length });
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: error.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // Production Plans APIs
+  // ------------------------------------------------------------------
+  app.get('/api/production-plans', async (_req, res) => {
+    try {
+      const { rows } = await pool.query('SELECT * FROM production_plans');
+      res.json(rows || []);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/production-plans', async (req, res) => {
+    try {
+      const plan = req.body;
+      const query = `
+        INSERT INTO production_plans (
+          id, plan_type, machine_id, date_key, jobs, day_ot, night_ot,
+          is_abnormal, abnormal_type, abnormal_start, is_ng, ng_type, ng_start, logs
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        ON CONFLICT (id) DO UPDATE SET
+          plan_type = EXCLUDED.plan_type,
+          machine_id = EXCLUDED.machine_id,
+          date_key = EXCLUDED.date_key,
+          jobs = EXCLUDED.jobs,
+          day_ot = EXCLUDED.day_ot,
+          night_ot = EXCLUDED.night_ot,
+          is_abnormal = EXCLUDED.is_abnormal,
+          abnormal_type = EXCLUDED.abnormal_type,
+          abnormal_start = EXCLUDED.abnormal_start,
+          is_ng = EXCLUDED.is_ng,
+          ng_type = EXCLUDED.ng_type,
+          ng_start = EXCLUDED.ng_start,
+          logs = EXCLUDED.logs,
+          updated_at = NOW()
+        RETURNING *
+      `;
+      const values = [
+        plan.id, plan.plan_type, plan.machine_id, plan.date_key, JSON.stringify(plan.jobs || []),
+        plan.day_ot || 'teiji', plan.night_ot || 'teiji',
+        plan.is_abnormal || false, plan.abnormal_type || null, plan.abnormal_start || null,
+        plan.is_ng || false, plan.ng_type || null, plan.ng_start || null,
+        JSON.stringify(plan.logs || [])
+      ];
+      const { rows } = await pool.query(query, values);
+      const updatedPlan = rows[0];
+
+      // Broadcast update to all Socket.io clients
+      io.emit('production_plan_updated', updatedPlan);
+
+      res.json(updatedPlan);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // Label Counters APIs
+  // ------------------------------------------------------------------
+  app.get('/api/label-counters/:date_key', async (req, res) => {
+    try {
+      const { date_key } = req.params;
+      const { rows } = await pool.query('SELECT seq FROM label_counters WHERE date_key = $1', [date_key]);
+      if (rows.length > 0) {
+        res.json({ seq: rows[0].seq });
+      } else {
+        res.json({ seq: 0 });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/label-counters', async (req, res) => {
+    try {
+      const { date_key, seq } = req.body;
+      const query = `
+        INSERT INTO label_counters (date_key, seq, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (date_key) DO UPDATE SET
+          seq = EXCLUDED.seq,
+          updated_at = NOW()
+        RETURNING *
+      `;
+      const { rows } = await pool.query(query, [date_key, seq]);
+      res.json(rows[0]);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -633,7 +898,23 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  // Socket.io & HTTP server initialization
+  const server = http.createServer(app);
+  const io = new Server(server, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"]
+    }
+  });
+
+  io.on('connection', (socket) => {
+    console.log('Client connected:', socket.id);
+    socket.on('disconnect', () => {
+      console.log('Client disconnected:', socket.id);
+    });
+  });
+
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
