@@ -26,7 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (method === 'GET') {
       const { data: users, error } = await supabaseAdmin
         .from('users')
-        .select('id, uid, email, role, name, photo_url, created_at')
+        .select('id, uid, username, role, name, photo_url, created_at')
         .order('created_at', { ascending: false });
 
       if (error) return res.status(500).json({ error: error.message });
@@ -35,13 +35,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // --- POST: Create a new user ---
     if (method === 'POST') {
-      const email = String(req.body?.email || '').trim().toLowerCase();
+      const username = String(req.body?.username || '').trim().toLowerCase();
       const role = String(req.body?.role || '').trim();
       const name = String(req.body?.name || '').trim();
       const password = String(req.body?.password || '').trim();
 
-      if (!email || !role || !name || !password) {
-        return res.status(400).json({ error: 'Email, role, name, and password are required.' });
+      if (!username || !role || !name || !password) {
+        return res.status(400).json({ error: 'Username, role, name, and password are required.' });
+      }
+
+      if (username.length < 3) {
+        return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
       }
 
       // Validate role
@@ -54,17 +58,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('users')
         .insert({
           uid: `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          email,
+          username,
           role,
           name,
           password_hash: hashPin(password)
         })
-        .select('id, email, role, name, created_at')
+        .select('id, username, role, name, created_at')
         .single();
 
       if (error) {
         if (error.code === '23505') {
-          return res.status(400).json({ error: 'Email address already registered.' });
+          return res.status(400).json({ error: 'Username already registered.' });
         }
         return res.status(500).json({ error: error.message });
       }
@@ -75,13 +79,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // --- PUT: Update user details ---
     if (method === 'PUT') {
       const id = String(req.body?.id || '').trim();
-      const email = String(req.body?.email || '').trim().toLowerCase();
+      const username = String(req.body?.username || '').trim().toLowerCase();
       const role = String(req.body?.role || '').trim();
       const name = String(req.body?.name || '').trim();
       const password = String(req.body?.password || '').trim();
 
-      if (!id || !email || !role || !name) {
-        return res.status(400).json({ error: 'ID, email, role, and name are required.' });
+      if (!id || !username || !role || !name) {
+        return res.status(400).json({ error: 'ID, username, role, and name are required.' });
+      }
+
+      if (username.length < 3) {
+        return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
       }
 
       // Validate role
@@ -90,7 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Invalid user role specified.' });
       }
 
-      const updatePayload: any = { email, role, name };
+      const updatePayload: any = { username, role, name };
       if (password) {
         updatePayload.password_hash = hashPin(password);
       }
@@ -99,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('users')
         .update(updatePayload)
         .eq('id', id)
-        .select('id, email, role, name, created_at')
+        .select('id, username, role, name, created_at')
         .single();
 
       if (error) return res.status(500).json({ error: error.message });

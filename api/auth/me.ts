@@ -57,7 +57,7 @@ export default async function handler(req: any, res: any) {
     return res.json({
       authenticated: true,
       user: {
-        email: decoded.email,
+        username: decoded.username,
         role: decoded.role,
         name: decoded.name
       }

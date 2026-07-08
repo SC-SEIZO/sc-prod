@@ -49,7 +49,7 @@ export function DatabasePage() {
   const [userSearch, setUserSearch] = useState('');
   
   // Add User Form States
-  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserUsername, setNewUserUsername] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserRole, setNewUserRole] = useState<'super-admin' | 'planner' | 'leader' | 'member' | 'production-board'>('planner');
   const [newUserPassword, setNewUserPassword] = useState('');
@@ -57,7 +57,7 @@ export function DatabasePage() {
   // Edit User State
   const [selectedUserForEdit, setSelectedUserForEdit] = useState<any | null>(null);
   const [editUserForm, setEditUserForm] = useState({
-    email: '',
+    username: '',
     name: '',
     role: 'planner' as 'super-admin' | 'planner' | 'leader' | 'member' | 'production-board',
     password: ''
@@ -126,8 +126,12 @@ export function DatabasePage() {
 
   const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserEmail.trim() || !newUserName.trim() || !newUserPassword.trim()) {
+    if (!newUserUsername.trim() || !newUserName.trim() || !newUserPassword.trim()) {
       triggerNotification('Please fill in all fields.', 'error');
+      return;
+    }
+    if (newUserUsername.trim().length < 3) {
+      triggerNotification('Username must be at least 3 characters long.', 'error');
       return;
     }
     try {
@@ -135,7 +139,7 @@ export function DatabasePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: newUserEmail.trim(),
+          username: newUserUsername.trim(),
           name: newUserName.trim(),
           role: newUserRole,
           password: newUserPassword.trim()
@@ -143,7 +147,7 @@ export function DatabasePage() {
       });
       if (res.ok) {
         triggerNotification(`User ${newUserName} registered successfully!`, 'success');
-        setNewUserEmail('');
+        setNewUserUsername('');
         setNewUserName('');
         setNewUserPassword('');
         setNewUserRole('planner');
@@ -160,8 +164,12 @@ export function DatabasePage() {
   const handleEditUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUserForEdit) return;
-    if (!editUserForm.email.trim() || !editUserForm.name.trim()) {
+    if (!editUserForm.username.trim() || !editUserForm.name.trim()) {
       triggerNotification('Please fill in all required fields.', 'error');
+      return;
+    }
+    if (editUserForm.username.trim().length < 3) {
+      triggerNotification('Username must be at least 3 characters long.', 'error');
       return;
     }
     try {
@@ -170,7 +178,7 @@ export function DatabasePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: selectedUserForEdit.id,
-          email: editUserForm.email.trim(),
+          username: editUserForm.username.trim(),
           name: editUserForm.name.trim(),
           role: editUserForm.role,
           password: editUserForm.password.trim() || undefined
@@ -3308,12 +3316,12 @@ DROP POLICY IF EXISTS "Allow public write" ON public.leaders;
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Email Address</label>
+                    <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Username</label>
                     <input
-                      type="email"
-                      placeholder="e.g. johndoe@sugity.co.id"
-                      value={newUserEmail}
-                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      type="text"
+                      placeholder="e.g. johndoe"
+                      value={newUserUsername}
+                      onChange={(e) => setNewUserUsername(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-mono"
                       required
                     />
@@ -3392,7 +3400,7 @@ DROP POLICY IF EXISTS "Allow public write" ON public.leaders;
                             if (!q) return true;
                             return (
                               (u.name || '').toLowerCase().includes(q) ||
-                              (u.email || '').toLowerCase().includes(q) ||
+                              (u.username || '').toLowerCase().includes(q) ||
                               (u.role || '').toLowerCase().includes(q)
                             );
                           })
@@ -3401,7 +3409,7 @@ DROP POLICY IF EXISTS "Allow public write" ON public.leaders;
                               <td className="px-5 py-3.5 text-left">
                                 <div className="flex flex-col gap-0.5">
                                   <span className="font-extrabold text-slate-800">{u.name || 'Unnamed User'}</span>
-                                  <span className="text-[10px] text-slate-400 font-mono font-medium">{u.email}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono font-medium">{u.username}</span>
                                 </div>
                               </td>
                               <td className="px-4 py-3.5">
@@ -3428,7 +3436,7 @@ DROP POLICY IF EXISTS "Allow public write" ON public.leaders;
                                     onClick={() => {
                                       setSelectedUserForEdit(u);
                                       setEditUserForm({
-                                        email: u.email,
+                                        username: u.username,
                                         name: u.name || '',
                                         role: u.role,
                                         password: ''
@@ -3440,7 +3448,7 @@ DROP POLICY IF EXISTS "Allow public write" ON public.leaders;
                                     <Edit2 className="w-3.5 h-3.5" />
                                   </button>
                                   <button
-                                    onClick={() => handleDeleteUser(u.id, u.name || u.email)}
+                                    onClick={() => handleDeleteUser(u.id, u.name || u.username)}
                                     className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
                                     title="Delete Account"
                                   >
@@ -3477,7 +3485,7 @@ DROP POLICY IF EXISTS "Allow public write" ON public.leaders;
                 <div>
                   <h3 className="font-bold text-sm tracking-wide">Edit System User</h3>
                   <p className="text-[9px] text-white/80 font-bold uppercase tracking-wider mt-0.5 font-mono">
-                    {selectedUserForEdit.email}
+                    {selectedUserForEdit.username}
                   </p>
                 </div>
               </div>
@@ -3502,12 +3510,12 @@ DROP POLICY IF EXISTS "Allow public write" ON public.leaders;
               </div>
 
               <div className="space-y-1">
-                <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Email Address *</label>
+                <label className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Username *</label>
                 <input
-                  type="email"
+                  type="text"
                   required
-                  value={editUserForm.email}
-                  onChange={(e) => setEditUserForm(prev => ({ ...prev, email: e.target.value }))}
+                  value={editUserForm.username}
+                  onChange={(e) => setEditUserForm(prev => ({ ...prev, username: e.target.value }))}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-[#E76114] transition-colors bg-white font-mono"
                 />
               </div>

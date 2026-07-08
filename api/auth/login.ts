@@ -102,11 +102,15 @@ export default async function handler(req: any, res: any) {
       return res.status(503).json({ error: 'Supabase is not configured on the server.' });
     }
 
-    const email = String(req.body?.email || '').trim().toLowerCase();
+    const username = String(req.body?.username || '').trim().toLowerCase();
     const password = String(req.body?.password || '').trim();
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' });
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+    }
+
+    if (username.length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
     }
 
     const clientIp = getClientIp(req);
@@ -116,11 +120,11 @@ export default async function handler(req: any, res: any) {
       return res.status(429).json({ error: `Too many login attempts. Locked out. Try again in ${check.remainingSeconds}s.` });
     }
 
-    // Query user by email
+    // Query user by username
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, role, name, password_hash')
-      .eq('email', email)
+      .select('id, username, role, name, password_hash')
+      .eq('username', username)
       .maybeSingle();
 
     const user = data as any;
@@ -131,7 +135,7 @@ export default async function handler(req: any, res: any) {
       if (limitResult.lockedOut) {
         return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
       }
-      return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
+      return res.status(401).json({ error: `Invalid username or password. (${limitResult.attempts}/5 attempts)` });
     }
 
     const isMatched = verifyPinHash(password, user.password_hash);
@@ -140,7 +144,7 @@ export default async function handler(req: any, res: any) {
       if (limitResult.lockedOut) {
         return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
       }
-      return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
+      return res.status(401).json({ error: `Invalid username or password. (${limitResult.attempts}/5 attempts)` });
     }
 
     // Success! Reset attempts
@@ -150,7 +154,7 @@ export default async function handler(req: any, res: any) {
     const token = signJwt(
       {
         userId: user.id,
-        email: user.email,
+        username: user.username,
         role: user.role,
         name: user.name,
         exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
@@ -169,7 +173,7 @@ export default async function handler(req: any, res: any) {
       success: true,
       user: {
         id: user.id,
-        email: user.email,
+        username: user.username,
         role: user.role,
         name: user.name
       }

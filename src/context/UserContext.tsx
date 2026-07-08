@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-export type UserRole = 'super-admin' | 'planner' | 'member' | 'leader' | 'viewer' | 'production-board' | 'guest';
+export type UserRole = 'super-admin' | 'planner' | 'member' | 'leader' | 'production-board' | 'guest';
 export type AppTheme = 'sugity' | 'carbon' | 'ocean' | 'sakura' | 'light';
 
 export interface Leader {
@@ -34,9 +34,9 @@ interface UserContextType {
   verifyLeaderPin: (pin: string) => Promise<Leader | null>;
   isLeaderDbConnected: boolean;
   isAuthenticated: boolean;
-  currentUser: { email: string; role: string; name: string } | null;
+  currentUser: { username: string; role: string; name: string } | null;
   isLoadingAuth: boolean;
-  loginSystem: (email: string, password: string) => Promise<void>;
+  loginSystem: (username: string, password: string) => Promise<void>;
   logoutSystem: () => Promise<void>;
 }
 
@@ -48,7 +48,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   // Auth states
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<{ email: string; role: string; name: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ username: string; role: string; name: string } | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
 
   // Persistence for app theme
@@ -87,11 +87,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginSystem = async (email: string, password: string) => {
+  const loginSystem = async (username: string, password: string) => {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ username, password })
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

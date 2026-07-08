@@ -113,7 +113,8 @@ export function Sidebar({ currentView, onChangeView, isMobileOpen, onClose }: Si
             {role === 'super-admin' ? 'SA' :
              role === 'planner' ? 'PL' : 
              role === 'leader' ? 'LD' : 
-             role === 'member' ? 'MB' : 'VW'}
+             role === 'member' ? 'MB' : 
+             role === 'production-board' ? 'PB' : 'GS'}
           </div>
           <div className="text-left flex-1">
             <div className="text-[13px] text-white font-bold leading-tight capitalize">{role}</div>

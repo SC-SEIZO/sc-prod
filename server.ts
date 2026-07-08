@@ -178,15 +178,19 @@ async function startServer() {
   // Device Auth APIs (JWT in Cookies)
   // ------------------------------------------------------------------
 
-  // POST /api/auth/login: verify email/password and set HttpOnly cookie
+  // POST /api/auth/login: verify username/password and set HttpOnly cookie
   app.post('/api/auth/login', async (req, res) => {
     if (!requireDb(res)) return;
     try {
-      const email = String(req.body?.email || '').trim().toLowerCase();
+      const username = String(req.body?.username || '').trim().toLowerCase();
       const password = String(req.body?.password || '').trim();
 
-      if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required.' });
+      if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password are required.' });
+      }
+
+      if (username.length < 3) {
+        return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
       }
 
       const clientIp = getClientIp(req);
@@ -198,8 +202,8 @@ async function startServer() {
 
       const { data: user, error } = await supabaseAdmin!
         .from('users')
-        .select('id, email, role, name, password_hash')
-        .eq('email', email)
+        .select('id, username, role, name, password_hash')
+        .eq('username', username)
         .maybeSingle();
 
       if (error) return res.status(500).json({ error: error.message });
@@ -208,7 +212,7 @@ async function startServer() {
         if (limitResult.lockedOut) {
           return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
         }
-        return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
+        return res.status(401).json({ error: `Invalid username or password. (${limitResult.attempts}/5 attempts)` });
       }
 
       const isMatched = verifyPinHash(password, user.password_hash);
@@ -217,14 +221,14 @@ async function startServer() {
         if (limitResult.lockedOut) {
           return res.status(429).json({ error: 'Too many login attempts. Locked out for 60 seconds.' });
         }
-        return res.status(401).json({ error: `Invalid email or password. (${limitResult.attempts}/5 attempts)` });
+        return res.status(401).json({ error: `Invalid username or password. (${limitResult.attempts}/5 attempts)` });
       }
 
       recordSuccess(rateLimitKey as string);
 
       const payload = {
         id: user.id,
-        email: user.email,
+        username: user.username,
         role: user.role,
         name: user.name,
         timestamp: Date.now()
@@ -245,7 +249,7 @@ async function startServer() {
       res.json({
         success: true,
         user: {
-          email: user.email,
+          username: user.username,
           role: user.role,
           name: user.name
         }
@@ -328,7 +332,7 @@ async function startServer() {
       res.json({
         authenticated: true,
         user: {
-          email: decoded.email,
+          username: decoded.username,
           role: decoded.role,
           name: decoded.name
         }
@@ -370,7 +374,7 @@ async function startServer() {
       if (method === 'GET') {
         const { data: users, error } = await supabaseAdmin!
           .from('users')
-          .select('id, uid, email, role, name, photo_url, created_at')
+          .select('id, uid, username, role, name, photo_url, created_at')
           .order('created_at', { ascending: false });
 
         if (error) return res.status(500).json({ error: error.message });
@@ -378,13 +382,17 @@ async function startServer() {
       }
 
       if (method === 'POST') {
-        const email = String(req.body?.email || '').trim().toLowerCase();
+        const username = String(req.body?.username || '').trim().toLowerCase();
         const role = String(req.body?.role || '').trim();
         const name = String(req.body?.name || '').trim();
         const password = String(req.body?.password || '').trim();
 
-        if (!email || !role || !name || !password) {
-          return res.status(400).json({ error: 'Email, role, name, and password are required.' });
+        if (!username || !role || !name || !password) {
+          return res.status(400).json({ error: 'Username, role, name, and password are required.' });
+        }
+
+        if (username.length < 3) {
+          return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
         }
 
         const validRoles = ['super-admin', 'planner', 'leader', 'member', 'production-board'];
@@ -396,17 +404,17 @@ async function startServer() {
           .from('users')
           .insert({
             uid: `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            email,
+            username,
             role,
             name,
             password_hash: hashPin(password)
           })
-          .select('id, email, role, name, created_at')
+          .select('id, username, role, name, created_at')
           .single();
 
         if (error) {
           if (error.code === '23505') {
-            return res.status(400).json({ error: 'Email address already registered.' });
+            return res.status(400).json({ error: 'Username already registered.' });
           }
           return res.status(500).json({ error: error.message });
         }
@@ -416,13 +424,17 @@ async function startServer() {
 
       if (method === 'PUT') {
         const id = String(req.body?.id || '').trim();
-        const email = String(req.body?.email || '').trim().toLowerCase();
+        const username = String(req.body?.username || '').trim().toLowerCase();
         const role = String(req.body?.role || '').trim();
         const name = String(req.body?.name || '').trim();
         const password = String(req.body?.password || '').trim();
 
-        if (!id || !email || !role || !name) {
-          return res.status(400).json({ error: 'ID, email, role, and name are required.' });
+        if (!id || !username || !role || !name) {
+          return res.status(400).json({ error: 'ID, username, role, and name are required.' });
+        }
+
+        if (username.length < 3) {
+          return res.status(400).json({ error: 'Username must be at least 3 characters long.' });
         }
 
         const validRoles = ['super-admin', 'planner', 'leader', 'member', 'production-board'];
@@ -430,7 +442,7 @@ async function startServer() {
           return res.status(400).json({ error: 'Invalid user role specified.' });
         }
 
-        const updatePayload: any = { email, role, name };
+        const updatePayload: any = { username, role, name };
         if (password) {
           updatePayload.password_hash = hashPin(password);
         }
@@ -439,7 +451,7 @@ async function startServer() {
           .from('users')
           .update(updatePayload)
           .eq('id', id)
-          .select('id, email, role, name, created_at')
+          .select('id, username, role, name, created_at')
           .single();
 
         if (error) return res.status(500).json({ error: error.message });

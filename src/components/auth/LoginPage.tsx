@@ -172,7 +172,7 @@ export function LoginPage() {
   const [selectedPortal, setSelectedPortal] = useState<'super-admin' | 'planner' | 'leader' | 'member' | 'production-board' | null>(null);
 
   // Device Authentication Form States
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
@@ -277,9 +277,15 @@ export function LoginPage() {
       return;
     }
     
+    if (username.trim().length < 3) {
+      setErrorMsg('Username must be at least 3 characters long.');
+      setIsLoggingIn(false);
+      return;
+    }
+
     setIsLoggingIn(true);
     try {
-      await loginSystem(email, password);
+      await loginSystem(username, password);
       setDeviceFailedAttempts(0);
       setDeviceLockoutTime(null);
     } catch (err: any) {
@@ -324,7 +330,7 @@ export function LoginPage() {
     if (portal === 'leader') {
       // Leader enters directly; seed a default session based on the authenticated device user
       const sessionPayload = {
-        id: currentUser?.email || 'device-leader',
+        id: currentUser?.username || 'device-leader',
         name: currentUser?.name || 'Device Leader',
         loginTimestamp: Date.now()
       };
@@ -452,7 +458,7 @@ export function LoginPage() {
       bg: styles.accentBg,
       border: styles.accentBorder,
       action: 'Access Portal',
-      visible: userRole === 'planner' || userRole === 'leader' || userRole === 'super-admin'
+      visible: userRole === 'leader' || userRole === 'super-admin'
     },
     {
       id: 'member' as const,
@@ -464,7 +470,7 @@ export function LoginPage() {
       bg: styles.accentBg,
       border: styles.accentBorder,
       action: 'Access Console',
-      visible: userRole === 'planner' || userRole === 'leader' || userRole === 'member' || userRole === 'super-admin'
+      visible: userRole === 'member' || userRole === 'super-admin'
     },
     {
       id: 'production-board' as const,
@@ -476,7 +482,7 @@ export function LoginPage() {
       bg: styles.accentBg,
       border: styles.accentBorder,
       action: 'Enter Board',
-      visible: true
+      visible: userRole !== 'member'
     }
   ];
 
@@ -491,7 +497,7 @@ export function LoginPage() {
         <div className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] transition-colors duration-500 ${styles.glow2}`}></div>
 
         {/* Brand Header */}
-        <div className="w-full sm:absolute sm:top-8 sm:left-8 flex items-center justify-center sm:justify-start gap-3 mb-6 sm:mb-0 z-20">
+        <div className="w-full sm:absolute sm:top-8 sm:left-0 sm:px-8 flex items-center justify-center sm:justify-start gap-3 mb-6 sm:mb-0 z-20">
           <div className="w-[88px] h-[58px] flex items-center justify-center transition-all shrink-0">
             <img src="/logo.png" alt="SC Logo" className="max-h-full max-w-full object-contain" />
           </div>
@@ -520,12 +526,12 @@ export function LoginPage() {
 
             <form onSubmit={handleDeviceLoginSubmit} className="space-y-4 text-left">
               <div className="space-y-1">
-                <label className={`text-[10px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Email Address</label>
+                <label className={`text-[10px] font-black uppercase tracking-widest block ${styles.textDesc}`}>Username</label>
                 <input
-                  type="email"
-                  placeholder="name@sugity.co.id"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  placeholder="Enter username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   className={`w-full px-3.5 py-3 ${styles.inputBg} border ${styles.inputBorder} ${styles.focusBorder} ${styles.inputText} font-bold rounded-xl outline-none text-sm transition-all shadow-inner`}
                   required
                 />
@@ -579,7 +585,7 @@ export function LoginPage() {
       <div className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full blur-[120px] transition-colors duration-500 ${styles.glow2}`}></div>
 
       {/* Main Header / Brand Info & Logout */}
-      <div className="w-full sm:absolute sm:top-8 sm:left-8 sm:right-8 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 sm:mb-0 z-20">
+      <div className="w-full sm:absolute sm:top-8 sm:left-0 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 sm:mb-0 z-20">
         <div className="flex items-center gap-3">
           <div className="w-[88px] h-[58px] flex items-center justify-center transition-all shrink-0">
             <img src="/logo.png" alt="SC Logo" className="max-h-full max-w-full object-contain" />
@@ -591,10 +597,12 @@ export function LoginPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Device Active: <b className="text-slate-600">{currentUser?.name}</b></span>
+          <span className={`text-[10px] font-black uppercase tracking-wider ${styles.textDesc}`}>
+            Device Active: <b className={`${styles.textTitle}`}>{currentUser?.name}</b>
+          </span>
           <button
             onClick={logoutSystem}
-            className="px-4 py-2 border border-slate-300 hover:bg-slate-200/50 text-slate-700 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-[0.98] cursor-pointer"
+            className={`px-4 py-2 border ${styles.badgeBorder} ${styles.textSub} hover:bg-slate-200/50 dark:hover:bg-white/10 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all active:scale-[0.98] cursor-pointer`}
           >
             Logout System
           </button>
