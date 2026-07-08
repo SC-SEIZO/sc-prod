@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'sugity-default-secret-key-123456';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   const list: Record<string, string> = {};
@@ -17,7 +17,7 @@ function verifyJwt(token: string, secret: string): any {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const [headerB64, payloadB64, signatureB64] = parts;
-    
+
     // Verify signature
     const hmac = crypto.createHmac('sha256', secret);
     hmac.update(`${headerB64}.${payloadB64}`);

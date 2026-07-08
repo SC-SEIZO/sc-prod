@@ -159,9 +159,10 @@ export default async function handler(req: any, res: any) {
     );
 
     // Set cookie
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
     res.setHeader(
       'Set-Cookie',
-      `sugity_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
+      `sugity_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${isProd ? '; Secure' : ''}`
     );
 
     return res.json({
